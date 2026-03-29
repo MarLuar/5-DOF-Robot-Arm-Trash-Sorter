@@ -81,13 +81,15 @@ class UnifiedControlSystem:
         self.setup_ui()
         self.refresh_ports()
         self.load_calibration()
-        self.load_sequences()  # Load sequences after UI is setup
 
-        # Start camera preview in auto tab (single camera instance)
+        # Start camera preview in auto tab (single instance shared between tabs)
         self.start_camera()
 
         # Start logging
         self.log("System initialized - v1.00.02")
+
+        # Load sequences AFTER UI is setup (log_text must exist)
+        self.load_sequences()
     
     def setup_ui(self):
         """Setup main UI with notebook tabs"""
@@ -214,10 +216,7 @@ class UnifiedControlSystem:
         self.calib_canvas = tk.Canvas(left_frame, bg='black', width=640, height=480)
         self.calib_canvas.pack(fill=tk.BOTH, expand=True)
         self.calib_canvas.bind('<Button-1>', self.on_calib_click)
-        
-        # Start calibration preview
-        self.start_calib_preview()
-        
+
         # Buttons
         btn_frame = ttk.Frame(left_frame)
         btn_frame.pack(fill=tk.X, pady=10)
@@ -392,6 +391,12 @@ class UnifiedControlSystem:
     
     def log(self, message):
         """Add message to log"""
+        if not hasattr(self, 'log_text'):
+            # UI not ready yet, print to console
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            print(f"[{timestamp}] {message}")
+            return
+
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_text.config(state='normal')
         self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
