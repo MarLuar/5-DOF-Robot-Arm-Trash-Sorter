@@ -185,6 +185,10 @@ class UnifiedControlSystem:
         ttk.Button(top_bar, text="🪟 Open Floating Log Window",
                   command=self.open_floating_log).pack(side=tk.RIGHT, padx=5)
 
+        # Analysis mode button (for debugging)
+        ttk.Button(top_bar, text="🔍 Log Event",
+                  command=self.log_user_event).pack(side=tk.RIGHT, padx=5)
+
         # Create notebook for tabs
         self.notebook = ttk.Notebook(main_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True)
@@ -587,6 +591,37 @@ class UnifiedControlSystem:
 
         self.floating_log_window.protocol("WM_DELETE_WINDOW", on_close)
         self.log("Floating log window opened")
+
+    def log_user_event(self):
+        """Log a user event for analysis"""
+        # Create event log dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title("🔍 Log User Event")
+        dialog.geometry("400x200")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="What are you doing?", font=('Helvetica', 12, 'bold')).pack(pady=10)
+
+        event_var = tk.StringVar()
+        event_combo = ttk.Combobox(dialog, textvariable=event_var, width=40)
+        event_combo['values'] = (
+            'Testing servo movement',
+            'Playing sequence',
+            'Testing object detection',
+            'Testing pickup',
+            'Calibrating grid',
+            'Other'
+        )
+        event_combo.pack(pady=5)
+        event_combo.current(0)
+
+        def log_it():
+            event = event_var.get()
+            self.log(f"🔍 USER EVENT: {event}")
+            dialog.destroy()
+
+        ttk.Button(dialog, text="Log Event", command=log_it).pack(pady=10)
     
     def log(self, message):
         """Add message to log"""
@@ -1076,32 +1111,48 @@ class UnifiedControlSystem:
             self.log("⚠ Not connected to Arduino!")
             return
 
-        # Start playback in background thread
+        # Cancel any currently playing sequence
+        if hasattr(self, '_current_sequence_thread') and self._current_sequence_thread is not None:
+            self.log("⚠️ Stopping previous sequence...")
+
+        # Start new sequence in background thread
+        self.log(f"▶ Playing sequence: {seq_name}")
         thread = threading.Thread(target=self._play_sequence_thread, args=(seq_name,), daemon=True)
+        self._current_sequence_thread = thread
         thread.start()
 
     def _play_sequence_thread(self, seq_name):
-        """Background thread for playing sequence"""
-        self.log(f"▶ Playing sequence: {seq_name}")
+        """Background thread for playing sequence with proper cleanup"""
+        try:
+            self.log(f"⏱️ Starting sequence {seq_name} at {time.time():.3f}")
 
-        for step in self.sequences[seq_name]:
-            if 'angles' in step:
-                # Send multi-move command
-                angles = step['angles']
-                delay = step.get('delay', 1000)
+            for i, step in enumerate(self.sequences[seq_name]):
+                if 'angles' in step:
+                    # Send multi-move command
+                    angles = step['angles']
+                    delay = step.get('delay', 1000)
+                    step_start = time.time()
 
-                try:
                     command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
-                    self.serial_conn.write(command.encode())
+                    self.send_to_arduino(command)
                     self.root.after(0, lambda a=angles: self.log(f"  → Sent: {a}"))
-                    time.sleep(delay / 1000.0)
-                except Exception as ex:
-                    error_msg = str(ex)
-                    self.root.after(0, lambda msg=error_msg: self.log(f"✗ Error: {msg}"))
-                    break
 
-        self.root.after(0, lambda: self.log("✓ Sequence complete"))
-    
+                    # Wait for servo movement (minimum 0.5 seconds)
+                    time.sleep(max(0.5, delay / 1000.0))
+
+                    step_elapsed = time.time() - step_start
+                    if step_elapsed > 0.6:
+                        self.log(f"⏱️ Step {i+1} took {step_elapsed:.3f}s")
+
+            self.root.after(0, lambda: self.log(f"✓ Sequence complete"))
+        except Exception as ex:
+            error_msg = str(ex)
+            self.root.after(0, lambda msg=error_msg: self.log(f"✗ Error: {msg}"))
+        finally:
+            # Clean up thread reference
+            if hasattr(self, '_current_sequence_thread'):
+                self._current_sequence_thread = None
+
     def stop_sequence(self):
         """Stop sequence (placeholder)"""
         self.log("Sequence stopped")
@@ -1520,13 +1571,18 @@ class UnifiedControlSystem:
         self.log(f"🤖 Starting pickup sequence for {cell}...")
         self.pickup_btn.config(state='disabled')
 
+        # Cancel any currently playing sequence
+        if hasattr(self, '_current_pickup_thread') and self._current_pickup_thread is not None:
+            self.log("⚠️ Stopping previous pickup...")
+
         thread = threading.Thread(target=self._execute_pickup_sequence, args=(cell,), daemon=True)
+        self._current_pickup_thread = thread
         thread.start()
 
     def _execute_pickup_sequence(self, cell):
-        """Execute pickup sequence in background thread with debug timing"""
+        """Execute pickup sequence in background thread with proper cleanup"""
         try:
-            self.log(f"⏱️ Starting sequence for {cell} at {time.time():.3f}")
+            self.log(f"⏱️ Starting pickup for {cell} at {time.time():.3f}")
 
             for i, step in enumerate(self.sequences[cell]):
                 if 'angles' in step:
@@ -1540,14 +1596,15 @@ class UnifiedControlSystem:
 
                     self.root.after(0, lambda s=i+1, c=cell: self.log(f"  Step {s}/{len(self.sequences[c])}: {angles}"))
 
-                    # Wait for servo movement (minimum 1 second)
-                    time.sleep(max(1.0, delay / 1000.0))
+                    # Wait for servo movement (minimum 0.5 seconds)
+                    time.sleep(max(0.5, delay / 1000.0))
 
                     step_elapsed = time.time() - step_start
-                    self.log(f"⏱️ Step {i+1} took {step_elapsed:.3f}s")
+                    if step_elapsed > 0.6:
+                        self.log(f"⏱️ Step {i+1} took {step_elapsed:.3f}s")
 
             total_elapsed = time.time() - step_start
-            self.root.after(0, lambda c=cell: self.log(f"✓ Pickup sequence for {c} complete! (Total: {total_elapsed:.3f}s)"))
+            self.root.after(0, lambda c=cell: self.log(f"✓ Pickup for {c} complete! (Total: {total_elapsed:.3f}s)"))
             self.root.after(0, lambda: self.log("🤖 Object picked up successfully!"))
 
             # Recapture empty grid after successful pickup
@@ -1556,6 +1613,10 @@ class UnifiedControlSystem:
         except Exception as e:
             self.root.after(0, lambda: self.log(f"✗ Pickup error: {e}"))
             self.root.after(0, lambda: self.pickup_btn.config(state='normal'))
+        finally:
+            # Clean up thread reference
+            if hasattr(self, '_current_pickup_thread'):
+                self._current_pickup_thread = None
 
     def _recapture_empty_grid_after_pickup(self):
         """Recapture empty grid reference after pickup"""
