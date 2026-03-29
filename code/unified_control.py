@@ -542,6 +542,16 @@ class UnifiedControlSystem:
                 self.calib_canvas.after(30, self.update_calib_preview)
                 return
 
+            # Draw clicked corners (always visible)
+            corner_colors = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (0, 255, 255)]
+            corner_names = ['1:TL', '2:TR', '3:BL', '4:BR']
+            for i, (x, y) in enumerate(self.corners):
+                if i < 4:
+                    cv2.circle(frame, (x, y), 15, corner_colors[i], -1)
+                    cv2.circle(frame, (x, y), 20, corner_colors[i], 2)
+                    cv2.putText(frame, corner_names[i], (x+20, y-20),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, corner_colors[i], 2)
+
             # If calibrated, draw grid overlay on every frame
             if self.is_calibrated and len(self.all_points) >= 25:
                 # Draw grid lines
@@ -561,8 +571,7 @@ class UnifiedControlSystem:
                         pt2 = self.all_points[idx2]
                         cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
 
-                # Draw corner points
-                corner_colors = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (0, 255, 255)]
+                # Draw calculated corner points
                 for i in range(4):
                     if i < len(self.all_points):
                         x, y = self.all_points[i]
