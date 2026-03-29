@@ -158,20 +158,24 @@ class UnifiedControlSystem:
         # Left: Servo controls
         left_frame = ttk.LabelFrame(self.manual_tab, text="Servo Control", padding="10")
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
+
         self.input_boxes = []
         for i, name in enumerate(JOINT_NAMES):
             frame = ttk.Frame(left_frame)
             frame.pack(fill=tk.X, pady=3)
-            
+
             ttk.Label(frame, text=name, width=10).pack(side=tk.LEFT, padx=5)
-            
+
             var = tk.StringVar(value=str(DEFAULT_REST[i]))
             entry = ttk.Entry(frame, textvariable=var, width=6, justify='center')
             entry.pack(side=tk.LEFT, padx=5)
             entry.bind('<Return>', lambda e, idx=i: self.send_servo(idx))
             self.input_boxes.append(var)
-            
+
+            # Add warning for base servo
+            if i == 0:  # Base
+                ttk.Label(frame, text="(10-170° safe)", foreground='orange', font=('Helvetica', 8)).pack(side=tk.LEFT, padx=3)
+
             btn_frame = ttk.Frame(frame)
             btn_frame.pack(side=tk.LEFT)
             ttk.Button(btn_frame, text="-10", width=3,
@@ -476,10 +480,16 @@ class UnifiedControlSystem:
         self.log("Disconnected")
     
     def adjust_servo(self, idx, delta):
-        """Adjust servo angle"""
+        """Adjust servo angle with validation"""
         try:
             current = int(self.input_boxes[idx].get())
             new_val = max(MIN_ANGLE, min(MAX_ANGLE, current + delta))
+
+            # Warn if trying to move base beyond safe limits
+            if idx == 0:  # Base servo
+                if new_val < 10 or new_val > 170:
+                    self.log(f"⚠ Warning: Base at {new_val}° (safe range: 10-170°)")
+
             self.input_boxes[idx].set(str(new_val))
         except:
             pass
@@ -495,21 +505,35 @@ class UnifiedControlSystem:
         thread.start()
 
     def _send_servo_thread(self, idx):
-        """Background thread for sending servo command"""
+        """Background thread for sending servo command with validation"""
         try:
             angle = int(self.input_boxes[idx].get())
+
+            # Validate angle
+            if angle < MIN_ANGLE or angle > MAX_ANGLE:
+                self.root.after(0, lambda: self.log(f"⚠ Invalid angle {angle}° for {JOINT_NAMES[idx]} (must be {MIN_ANGLE}-{MAX_ANGLE})"))
+                return
+
             command = f"{idx} {angle}\n"
             self.serial_conn.write(command.encode())
             # Update UI from main thread
             self.root.after(0, lambda idx=idx, angle=angle: self.log(f"Sent: {JOINT_NAMES[idx]} -> {angle}°"))
+        except ValueError:
+            self.root.after(0, lambda: self.log(f"⚠ Invalid angle value"))
         except Exception as ex:
             error_msg = str(ex)
             self.root.after(0, lambda msg=error_msg: self.log(f"Error: {msg}"))
 
     def send_multi_move(self, angles):
-        """Send multi-move command in background thread"""
+        """Send multi-move command in background thread with validation"""
         if not self.is_connected:
             return
+
+        # Validate all angles first
+        for i, angle in enumerate(angles):
+            if angle < MIN_ANGLE or angle > MAX_ANGLE:
+                self.log(f"⚠ Invalid angle {angle}° for {JOINT_NAMES[i]} (must be {MIN_ANGLE}-{MAX_ANGLE})")
+                return
 
         # Send in background thread to prevent UI hang
         thread = threading.Thread(target=self._send_multi_move_thread, args=(angles,), daemon=True)
