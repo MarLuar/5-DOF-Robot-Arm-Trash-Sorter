@@ -20,7 +20,6 @@ import threading
 import json
 import time
 import os
-import queue
 from datetime import datetime
 
 # Configuration
@@ -139,7 +138,6 @@ class UnifiedControlSystem:
 
         # Performance optimizations
         self.serial_lock = threading.Lock()  # Thread-safe serial access
-        self.arduino_queue = queue.Queue()  # Command queue for Arduino
         self.frame_count = 0  # For frame skipping
 
         # Setup UI
@@ -153,9 +151,6 @@ class UnifiedControlSystem:
 
         # Load sequences (after UI is ready)
         self.load_sequences()
-
-        # Start Arduino worker thread
-        self.start_arduino_worker()
 
         # Auto-go to rest position after short delay (when connected)
         self.root.after(2000, self.auto_go_to_rest_on_startup)
@@ -891,35 +886,13 @@ class UnifiedControlSystem:
         self.log(f"📌 Pasted to Manual Control: {angles}")
         messagebox.showinfo("Pasted!", f"Angles pasted to Manual Control:\n{angles}\n\nClick 'Send' on any servo to move to this position")
 
-    def start_arduino_worker(self):
-        """Start Arduino command worker thread"""
-        def worker():
-            while True:
-                try:
-                    # Get command from queue (blocking)
-                    command = self.arduino_queue.get()
-                    if command is None:  # Shutdown signal
-                        break
-
-                    # Send with lock
-                    with self.serial_lock:
-                        if self.serial_conn and self.serial_conn.is_open:
-                            self.serial_conn.write(command.encode())
-                            self.serial_conn.flush()
-                            time.sleep(0.05)  # 50ms delay between commands
-                except Exception as e:
-                    self.log(f"Arduino worker error: {e}")
-
-        self.arduino_worker_thread = threading.Thread(target=worker, daemon=True)
-        self.arduino_worker_thread.start()
-        self.log("Arduino worker thread started")
-
     def send_to_arduino(self, command):
-        """Send command to Arduino via queue (thread-safe)"""
-        if self.is_connected:
-            self.arduino_queue.put(command)
-        else:
-            self.log(f"⚠ Not connected, command queued: {command.strip()}")
+        """Send command to Arduino directly with lock (thread-safe)"""
+        if self.is_connected and self.serial_conn and self.serial_conn.is_open:
+            with self.serial_lock:
+                self.serial_conn.write(command.encode())
+                self.serial_conn.flush()
+                time.sleep(0.02)  # Small delay for Arduino to process
 
     def refresh_seq_list(self):
         """Refresh sequence listbox"""
@@ -1184,7 +1157,7 @@ class UnifiedControlSystem:
             self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
             self.calib_canvas.image = photo
 
-            self.calib_canvas.after(100, self.update_calib_preview)  # 10 FPS instead of 30 FPS
+            self.calib_canvas.after(200, self.update_calib_preview)  # 5 FPS for better performance
         except Exception as e:
             self.log(f"Preview error: {e}")
             self.calib_canvas.after(1000, self.update_calib_preview)
@@ -1398,17 +1371,12 @@ class UnifiedControlSystem:
                     angles = step['angles']
                     delay = step.get('delay', 1000)
 
-                    # Send multi-move command
+                    # Send multi-move command directly
                     command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
+                    self.send_to_arduino(command)
 
-                    if self.serial_conn and self.serial_conn.is_open:
-                        self.serial_conn.reset_input_buffer()
-                        self.serial_conn.reset_output_buffer()
-                        self.serial_conn.write(command.encode())
-                        self.serial_conn.flush()
-
-                        self.root.after(0, lambda s=i+1, c=cell: self.log(f"  Step {s}/{len(self.sequences[c])}: {angles}"))
-                        time.sleep(delay / 1000.0)
+                    self.root.after(0, lambda s=i+1, c=cell: self.log(f"  Step {s}/{len(self.sequences[c])}: {angles}"))
+                    time.sleep(delay / 1000.0)
 
             self.root.after(0, lambda c=cell: self.log(f"✓ Pickup sequence for {c} complete!"))
             self.root.after(0, lambda: self.log("🤖 Object picked up successfully!"))
