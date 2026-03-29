@@ -422,7 +422,7 @@ class UnifiedControlSystem:
             self.connect()
     
     def connect(self):
-        """Connect to Arduino"""
+        """Connect to Arduino in background thread to prevent UI hang"""
         port = self.port_var.get()
         if not port:
             messagebox.showwarning("No Port", "Please select a port")
@@ -432,21 +432,36 @@ class UnifiedControlSystem:
         if ' - ' in port:
             port = port.split(' - ')[0]
 
+        # Start connection in background thread
+        thread = threading.Thread(target=self._connect_thread, args=(port,), daemon=True)
+        thread.start()
+
+    def _connect_thread(self, port):
+        """Background thread for Arduino connection"""
         try:
             self.serial_conn = serial.Serial(port, BAUD_RATE, timeout=1)
             time.sleep(2)  # Wait for Arduino reset
-            self.is_connected = True
-            self.connect_btn.config(text="Disconnect")
-            self.status_label.config(text="Status: Connected", foreground='green')
-            self.log(f"✓ Connected to {port}")
 
-            # Go to rest position automatically
-            self.log("Moving to rest position...")
-            self.go_to_rest()
-
+            # Update UI from main thread
+            self.root.after(0, self._on_connected, port)
         except Exception as e:
-            messagebox.showerror("Error", f"Could not connect: {e}")
-            self.log(f"Connection failed: {e}")
+            self.root.after(0, self._on_connect_error, e)
+
+    def _on_connected(self, port):
+        """Called when connection succeeds"""
+        self.is_connected = True
+        self.connect_btn.config(text="Disconnect")
+        self.status_label.config(text="Status: Connected", foreground='green')
+        self.log(f"✓ Connected to {port}")
+
+        # Go to rest position automatically
+        self.log("Moving to rest position...")
+        self.go_to_rest()
+
+    def _on_connect_error(self, error):
+        """Called when connection fails"""
+        messagebox.showerror("Error", f"Could not connect: {error}")
+        self.log(f"Connection failed: {error}")
     
     def disconnect(self):
         """Disconnect from Arduino"""
@@ -470,41 +485,62 @@ class UnifiedControlSystem:
             pass
     
     def send_servo(self, idx):
-        """Send single servo command (individual movement)"""
+        """Send single servo command in background thread"""
         if not self.is_connected:
             self.log("Not connected!")
             return
 
+        # Send in background thread to prevent UI hang
+        thread = threading.Thread(target=self._send_servo_thread, args=(idx,), daemon=True)
+        thread.start()
+
+    def _send_servo_thread(self, idx):
+        """Background thread for sending servo command"""
         try:
             angle = int(self.input_boxes[idx].get())
             command = f"{idx} {angle}\n"
             self.serial_conn.write(command.encode())
-            self.log(f"Sent: {JOINT_NAMES[idx]} -> {angle}°")
+            # Update UI from main thread
+            self.root.after(0, lambda: self.log(f"Sent: {JOINT_NAMES[idx]} -> {angle}°"))
         except Exception as e:
-            self.log(f"Error: {e}")
+            self.root.after(0, lambda: self.log(f"Error: {e}"))
 
     def send_multi_move(self, angles):
-        """Send multi-move command for simultaneous movement: M a1 a2 a3 a4 a5"""
+        """Send multi-move command in background thread"""
         if not self.is_connected:
             return
 
+        # Send in background thread to prevent UI hang
+        thread = threading.Thread(target=self._send_multi_move_thread, args=(angles,), daemon=True)
+        thread.start()
+
+    def _send_multi_move_thread(self, angles):
+        """Background thread for sending multi-move command"""
         try:
             command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
             self.serial_conn.write(command.encode())
-            self.log(f"Sent multi-move: {angles} (simultaneous)")
+            # Update UI from main thread
+            self.root.after(0, lambda: self.log(f"Sent multi-move: {angles} (simultaneous)"))
         except Exception as e:
-            self.log(f"Error: {e}")
+            self.root.after(0, lambda: self.log(f"Error: {e}"))
 
     def set_speed(self):
-        """Set movement speed"""
+        """Set movement speed in background thread"""
         if not self.is_connected:
             return
 
+        # Send in background thread
+        thread = threading.Thread(target=self._set_speed_thread, daemon=True)
+        thread.start()
+
+    def _set_speed_thread(self):
+        """Background thread for setting speed"""
         try:
             speed = int(self.speed_var.get())
             command = f"99 {speed}\n"
             self.serial_conn.write(command.encode())
-            self.log(f"Speed set to {speed}ms/deg")
+            # Update UI from main thread
+            self.root.after(0, lambda: self.log(f"Speed set to {speed}ms/deg"))
         except:
             pass
 
