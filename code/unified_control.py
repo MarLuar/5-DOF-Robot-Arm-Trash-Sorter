@@ -180,7 +180,7 @@ class UnifiedControlSystem:
 
             # Add warning for base servo
             if i == 0:  # Base
-                ttk.Label(frame, text="⚠ AVOID 110-120°!", foreground='red', font=('Helvetica', 8, 'bold')).pack(side=tk.LEFT, padx=3)
+                ttk.Label(frame, text="(⚠ 110-120° risky)", foreground='orange', font=('Helvetica', 8)).pack(side=tk.LEFT, padx=3)
 
             btn_frame = ttk.Frame(frame)
             btn_frame.pack(side=tk.LEFT)
@@ -524,10 +524,9 @@ class UnifiedControlSystem:
                 self.root.after(0, lambda: self.log(f"⚠ Invalid angle {angle}° for {JOINT_NAMES[idx]} (must be {MIN_ANGLE}-{MAX_ANGLE})"))
                 return
 
-            # CRITICAL: Block base servo from dead zone
+            # Warn about base servo dead zone (but don't block)
             if idx == 0 and BASE_WARNING_MIN <= angle <= BASE_WARNING_MAX:
-                self.root.after(0, lambda a=angle: self.log(f"🚨 BLOCKED: Base {a}° is in DEAD ZONE (110-120°)!"))
-                return
+                self.root.after(0, lambda a=angle: self.log(f"⚠ WARNING: Base {a}° is in danger zone (110-120°) - May malfunction!"))
 
             command = f"{idx} {angle}\n"
             self.serial_conn.write(command.encode())
@@ -589,12 +588,6 @@ class UnifiedControlSystem:
     def go_to_rest(self):
         """Go to rest position (simultaneous movement)"""
         rest_angles = LEGACY_PRESETS.get('Rest', DEFAULT_REST)
-
-        # Check if rest position has base in danger zone
-        if rest_angles[0] and BASE_WARNING_MIN <= rest_angles[0] <= BASE_WARNING_MAX:
-            self.log(f"🚨 WARNING: Rest position has base at {rest_angles[0]}° (danger zone)!")
-            self.log(f"  Consider changing Rest preset to avoid 110-120°")
-
         for i, angle in enumerate(rest_angles):
             self.input_boxes[i].set(str(angle))
         if self.is_connected:
@@ -604,11 +597,6 @@ class UnifiedControlSystem:
     def go_to_pickup(self):
         """Go to pickup position (simultaneous movement)"""
         pickup_angles = LEGACY_PRESETS.get('Pickup', DEFAULT_PICKUP)
-
-        # Check if pickup position has base in danger zone
-        if pickup_angles[0] and BASE_WARNING_MIN <= pickup_angles[0] <= BASE_WARNING_MAX:
-            self.log(f"🚨 WARNING: Pickup position has base at {pickup_angles[0]}° (danger zone)!")
-
         for i, angle in enumerate(pickup_angles):
             self.input_boxes[i].set(str(angle))
         if self.is_connected:
