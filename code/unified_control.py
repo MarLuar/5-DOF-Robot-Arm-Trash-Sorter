@@ -901,6 +901,128 @@ class UnifiedControlSystem:
             except Exception as e:
                 self.log(f"Serial error: {e}")
 
+    def start_camera_thread(self):
+        """Start camera preview in separate thread"""
+        def camera_loop():
+            self.camera_running = True
+            while self.camera_running:
+                try:
+                    self.update_calib_preview_once()
+                    time.sleep(1.0)  # 1 FPS
+                except Exception as e:
+                    self.log(f"Camera error: {e}")
+                    time.sleep(2)
+
+        self.camera_thread = threading.Thread(target=camera_loop, daemon=True)
+        self.camera_thread.start()
+        self.log("Camera thread started")
+
+    def update_calib_preview_once(self):
+        """Update calibration preview once (called from camera thread)"""
+        try:
+            if not self.cap or not self.cap.isOpened():
+                return
+
+            ret, frame = self.cap.read()
+            if not ret:
+                return
+
+            # Get canvas size (must be called from main thread)
+            canvas_width = self.calib_canvas.winfo_width()
+            canvas_height = self.calib_canvas.winfo_height()
+
+            if canvas_width < 2 or canvas_height < 2:
+                return
+
+            # Get frame dimensions
+            frame_height, frame_width = frame.shape[:2]
+
+            # Calculate scale to fit canvas (maintain aspect ratio)
+            scale_x = canvas_width / frame_width
+            scale_y = canvas_height / frame_height
+            scale = min(scale_x, scale_y)
+
+            new_width = int(frame_width * scale)
+            new_height = int(frame_height * scale)
+
+            if new_width < 1 or new_height < 1:
+                return
+
+            # Resize
+            display_frame = cv2.resize(frame, (new_width, new_height))
+
+            # Create black background
+            bg = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+
+            # Center image
+            y_offset = (canvas_height - new_height) // 2
+            x_offset = (canvas_width - new_width) // 2
+            bg[y_offset:y_offset+new_height, x_offset:x_offset+new_width] = display_frame
+
+            # Store scale and offset for marker drawing
+            self.calib_scale = scale
+            self.calib_x_offset = x_offset
+            self.calib_y_offset = y_offset
+
+            # Draw clicked corners (always visible) - scaled to display coordinates
+            corner_colors = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (0, 255, 255)]
+            corner_names = ['1:TL', '2:TR', '3:BL', '4:BR']
+
+            for i, (orig_x, orig_y) in enumerate(self.corners):
+                if i < 4:
+                    # Scale original click coordinates to display coordinates
+                    disp_x = int(orig_x * scale) + x_offset
+                    disp_y = int(orig_y * scale) + y_offset
+
+                    cv2.circle(bg, (disp_x, disp_y), 15, corner_colors[i], -1)
+                    cv2.circle(bg, (disp_x, disp_y), 20, corner_colors[i], 2)
+                    cv2.putText(bg, corner_names[i], (disp_x+20, disp_y-20),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, corner_colors[i], 2)
+
+            # Draw grid lines if calibrated
+            if self.is_calibrated and len(self.all_points) >= 25:
+                for row in range(5):
+                    idx1 = row * 5
+                    idx2 = idx1 + 4
+                    if idx2 < len(self.all_points):
+                        pt1_x = int(self.all_points[idx1][0] * scale) + x_offset
+                        pt1_y = int(self.all_points[idx1][1] * scale) + y_offset
+                        pt2_x = int(self.all_points[idx2][0] * scale) + x_offset
+                        pt2_y = int(self.all_points[idx2][1] * scale) + y_offset
+                        cv2.line(bg, (pt1_x, pt1_y), (pt2_x, pt2_y), (0, 255, 0), 2)
+
+                for col in range(5):
+                    idx1 = col
+                    idx2 = col + 20
+                    if idx2 < len(self.all_points):
+                        pt1_x = int(self.all_points[idx1][0] * scale) + x_offset
+                        pt1_y = int(self.all_points[idx1][1] * scale) + y_offset
+                        pt2_x = int(self.all_points[idx2][0] * scale) + x_offset
+                        pt2_y = int(self.all_points[idx2][1] * scale) + y_offset
+                        cv2.line(bg, (pt1_x, pt1_y), (pt2_x, pt2_y), (0, 255, 0), 2)
+
+            # Convert BGR to RGB
+            bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
+
+            # Convert to PhotoImage and update canvas (must be from main thread)
+            img = Image.fromarray(bg)
+            photo = ImageTk.PhotoImage(image=img)
+
+            # Update canvas from main thread
+            self.root.after(0, self._update_canvas_image, photo)
+
+        except Exception as e:
+            self.log(f"Preview error: {e}")
+
+    def _update_canvas_image(self, photo):
+        """Update canvas with new image (called from main thread)"""
+        try:
+            self.calib_canvas.delete("all")
+            self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
+            self.calib_canvas.image = photo
+        except:
+            pass
+
     def refresh_seq_list(self):
         """Refresh sequence listbox"""
         self.seq_listbox.delete(0, tk.END)
