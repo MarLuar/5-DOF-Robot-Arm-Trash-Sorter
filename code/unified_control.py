@@ -553,129 +553,196 @@ class UnifiedControlSystem:
             messagebox.showerror("Camera Error", "Could not open any camera!\n\nMake sure:\n1. Camera is plugged in\n2. Not used by another program\n3. Try: ls -la /dev/video*")
 
     def update_calib_preview(self):
-        """Update calibration tab preview"""
+        """Update calibration tab preview - copied from simple_grid_calib"""
         if not hasattr(self, 'cap') or self.cap is None or not self.cap.isOpened():
             return
 
         ret, frame = self.cap.read()
-        if ret:
-            # Draw corners on frame
-            for i, (x, y) in enumerate(self.corners):
-                color = [(0,0,255), (255,0,0), (0,255,0), (0,255,255)][i]
-                cv2.circle(frame, (int(x), int(y)), 10, color, -1)
-                cv2.circle(frame, (int(x), int(y)), 15, color, 2)
+        if not ret:
+            if hasattr(self, 'calib_canvas'):
+                self.calib_canvas.after(30, self.update_calib_preview)
+            return
 
-            # Convert BGR to RGB
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        self.original_height, self.original_width = frame.shape[:2]
 
-            # Get canvas size
-            canvas_width = self.calib_canvas.winfo_width()
-            canvas_height = self.calib_canvas.winfo_height()
+        # Get canvas size
+        canvas_width = self.calib_canvas.winfo_width()
+        canvas_height = self.calib_canvas.winfo_height()
 
-            # Scale image to fill canvas completely (may crop slightly)
-            if canvas_width > 1 and canvas_height > 1:
-                img_height, img_width = frame.shape[:2]
+        if canvas_width < 2 or canvas_height < 2:
+            if hasattr(self, 'calib_canvas'):
+                self.calib_canvas.after(30, self.update_calib_preview)
+            return
 
-                # Calculate scale to cover entire canvas (crop if needed)
-                scale_x = canvas_width / img_width
-                scale_y = canvas_height / img_height
-                scale = max(scale_x, scale_y)  # Use max to fill completely
+        # Calculate scale (use MIN to fit, not MAX which crops)
+        scale = min(canvas_width / self.original_width,
+                   canvas_height / self.original_height)
 
-                new_width = int(img_width * scale)
-                new_height = int(img_height * scale)
-                frame = cv2.resize(frame, (new_width, new_height))
+        new_width = int(self.original_width * scale)
+        new_height = int(self.original_height * scale)
 
-                # Center crop if larger than canvas
-                if new_width > canvas_width:
-                    x_start = (new_width - canvas_width) // 2
-                    frame = frame[:, x_start:x_start+canvas_width]
-                if new_height > canvas_height:
-                    y_start = (new_height - canvas_height) // 2
-                    frame = frame[y_start:y_start+canvas_height]
+        if new_width < 1 or new_height < 1:
+            if hasattr(self, 'calib_canvas'):
+                self.calib_canvas.after(30, self.update_calib_preview)
+            return
 
-            # Convert to PhotoImage
-            img = Image.fromarray(frame)
-            photo = ImageTk.PhotoImage(image=img)
+        # Resize
+        display_frame = cv2.resize(frame, (new_width, new_height))
 
-            # Update canvas
-            self.calib_canvas.delete("all")
-            self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
-            self.calib_canvas.image = photo
+        # Create black background
+        bg = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+
+        # Center image
+        y_offset = (canvas_height - new_height) // 2
+        x_offset = (canvas_width - new_width) // 2
+
+        bg[y_offset:y_offset+new_height, x_offset:x_offset+new_width] = display_frame
+
+        # Store for click calculation
+        self.calib_x_offset = x_offset
+        self.calib_y_offset = y_offset
+        self.calib_img_width = new_width
+        self.calib_img_height = new_height
+
+        # Draw corners on background (not on camera frame)
+        corner_colors = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (0, 255, 255)]
+        corner_names = ['1: TL', '2: TR', '3: BL', '4: BR']
+
+        for i, (orig_x, orig_y) in enumerate(self.corners):
+            # Convert original click coordinates to display coordinates
+            disp_x = int(orig_x * (new_width / self.original_width)) + x_offset
+            disp_y = int(orig_y * (new_height / self.original_height)) + y_offset
+
+            cv2.circle(bg, (disp_x, disp_y), 15, corner_colors[i], -1)
+            cv2.circle(bg, (disp_x, disp_y), 20, corner_colors[i], 2)
+            cv2.putText(bg, corner_names[i], (disp_x+20, disp_y-20),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, corner_colors[i], 2)
+
+        # Convert BGR to RGB
+        bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
+
+        # Convert to PhotoImage
+        img = Image.fromarray(bg)
+        photo = ImageTk.PhotoImage(image=img)
+
+        # Update canvas
+        self.calib_canvas.delete("all")
+        self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
+        self.calib_canvas.image = photo
 
         # Schedule next update
         if hasattr(self, 'calib_canvas'):
             self.calib_canvas.after(30, self.update_calib_preview)
 
     def update_auto_preview(self):
-        """Update auto detection tab preview"""
+        """Update auto detection tab preview - copied from simple_grid_calib"""
         if not hasattr(self, 'cap') or self.cap is None or not self.cap.isOpened():
             return
 
         ret, frame = self.cap.read()
-        if ret:
-            if self.auto_detect_enabled and self.empty_grid is not None:
-                # Detect objects
-                objects = self.detect_objects(frame)
+        if not ret:
+            if hasattr(self, 'auto_canvas'):
+                self.auto_canvas.after(30, self.update_auto_preview)
+            return
 
-                # Draw detections
-                for obj in objects:
-                    x, y, w, h = obj['x'], obj['y'], obj['w'], obj['h']
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                    cv2.putText(frame, f"Cell: {obj.get('cell', '?')}", (x, y-10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        if self.auto_detect_enabled and self.empty_grid is not None:
+            # Detect objects
+            objects = self.detect_objects(frame)
 
-            # Convert BGR to RGB
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Draw detections
+            for obj in objects:
+                x, y, w, h = obj['x'], obj['y'], obj['w'], obj['h']
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                cv2.putText(frame, f"Cell: {obj.get('cell', '?')}", (x, y-10),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-            # Get canvas size
-            canvas_width = self.auto_canvas.winfo_width()
-            canvas_height = self.auto_canvas.winfo_height()
+        self.original_height, self.original_width = frame.shape[:2]
 
-            # Scale image to fill canvas completely (may crop slightly)
-            if canvas_width > 1 and canvas_height > 1:
-                img_height, img_width = frame.shape[:2]
+        # Get canvas size
+        canvas_width = self.auto_canvas.winfo_width()
+        canvas_height = self.auto_canvas.winfo_height()
 
-                # Calculate scale to cover entire canvas (crop if needed)
-                scale_x = canvas_width / img_width
-                scale_y = canvas_height / img_height
-                scale = max(scale_x, scale_y)  # Use max to fill completely
+        if canvas_width < 2 or canvas_height < 2:
+            if hasattr(self, 'auto_canvas'):
+                self.auto_canvas.after(30, self.update_auto_preview)
+            return
 
-                new_width = int(img_width * scale)
-                new_height = int(img_height * scale)
-                frame = cv2.resize(frame, (new_width, new_height))
+        # Calculate scale (use MIN to fit, not MAX which crops)
+        scale = min(canvas_width / self.original_width,
+                   canvas_height / self.original_height)
 
-                # Center crop if larger than canvas
-                if new_width > canvas_width:
-                    x_start = (new_width - canvas_width) // 2
-                    frame = frame[:, x_start:x_start+canvas_width]
-                if new_height > canvas_height:
-                    y_start = (new_height - canvas_height) // 2
-                    frame = frame[y_start:y_start+canvas_height]
+        new_width = int(self.original_width * scale)
+        new_height = int(self.original_height * scale)
 
-            # Convert to PhotoImage
-            img = Image.fromarray(frame)
-            photo = ImageTk.PhotoImage(image=img)
+        if new_width < 1 or new_height < 1:
+            if hasattr(self, 'auto_canvas'):
+                self.auto_canvas.after(30, self.update_auto_preview)
+            return
 
-            # Update canvas
-            self.auto_canvas.delete("all")
-            self.auto_canvas.create_image(0, 0, anchor='nw', image=photo)
-            self.auto_canvas.image = photo
+        # Resize
+        display_frame = cv2.resize(frame, (new_width, new_height))
+
+        # Create black background
+        bg = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+
+        # Center image
+        y_offset = (canvas_height - new_height) // 2
+        x_offset = (canvas_width - new_width) // 2
+
+        bg[y_offset:y_offset+new_height, x_offset:x_offset+new_width] = display_frame
+
+        # Store offsets for click calculation
+        self.auto_x_offset = x_offset
+        self.auto_y_offset = y_offset
+        self.auto_img_width = new_width
+        self.auto_img_height = new_height
+
+        # Convert BGR to RGB
+        bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
+
+        # Convert to PhotoImage
+        img = Image.fromarray(bg)
+        photo = ImageTk.PhotoImage(image=img)
+
+        # Update canvas
+        self.auto_canvas.delete("all")
+        self.auto_canvas.create_image(0, 0, anchor='nw', image=photo)
+        self.auto_canvas.image = photo
 
         # Schedule next update
         if hasattr(self, 'auto_canvas'):
             self.auto_canvas.after(30, self.update_auto_preview)
     
     def on_calib_click(self, event):
-        """Handle calibration click - account for canvas scaling"""
+        """Handle calibration click - account for offset and scaling"""
         if len(self.corners) >= 4:
             return
 
-        # Get actual click position relative to canvas
-        canvas_x = event.x
-        canvas_y = event.y
+        # Get click position
+        click_x = event.x
+        click_y = event.y
 
-        # Store the click (we'll use canvas coordinates directly)
-        self.corners.append((canvas_x, canvas_y))
+        # Convert from display coordinates back to original image coordinates
+        if hasattr(self, 'calib_x_offset') and hasattr(self, 'calib_img_width'):
+            # Remove offset
+            adj_x = click_x - self.calib_x_offset
+            adj_y = click_y - self.calib_y_offset
+
+            # Check if click is within image area
+            if adj_x < 0 or adj_x > self.calib_img_width:
+                return
+            if adj_y < 0 or adj_y > self.calib_img_height:
+                return
+
+            # Scale back to original image coordinates
+            orig_x = int(adj_x * (self.original_width / self.calib_img_width))
+            orig_y = int(adj_y * (self.original_height / self.calib_img_height))
+
+            self.corners.append((orig_x, orig_y))
+        else:
+            # Fallback if offsets not set yet
+            self.corners.append((click_x, click_y))
+
         self.corner_label.config(text=f"Corners clicked: {len(self.corners)}/4")
 
         if len(self.corners) >= 4:
