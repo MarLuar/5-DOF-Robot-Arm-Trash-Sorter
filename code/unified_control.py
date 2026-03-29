@@ -236,9 +236,10 @@ class UnifiedControlSystem:
         # Presets
         preset_frame = ttk.LabelFrame(left_frame, text="Quick Presets", padding="10")
         preset_frame.pack(fill=tk.X, pady=10)
-        
+
         ttk.Button(preset_frame, text="Rest Position", command=self.go_to_rest).pack(side=tk.LEFT, padx=5)
         ttk.Button(preset_frame, text="Pickup Position", command=self.go_to_pickup).pack(side=tk.LEFT, padx=5)
+        ttk.Button(preset_frame, text="📤 Send All (Simultaneous)", command=self.send_all_servos).pack(side=tk.LEFT, padx=5)
         
         # Right: Connection, Presets & Speed
         right_frame = ttk.Frame(self.manual_tab)
@@ -845,6 +846,27 @@ class UnifiedControlSystem:
         if self.is_connected:
             self.send_multi_move(pickup_angles)
         self.log("Moved to pickup position (simultaneous)")
+
+    def send_all_servos(self):
+        """Send all servo angles simultaneously"""
+        if not self.is_connected:
+            messagebox.showwarning("Warning", "Not connected to Arduino!")
+            return
+
+        try:
+            angles = [int(self.input_boxes[i].get()) for i in range(5)]
+
+            # Validate all angles
+            for i, angle in enumerate(angles):
+                if angle < 0 or angle > 180:
+                    messagebox.showwarning("Warning", f"{JOINT_NAMES[i]} angle must be 0-180°")
+                    return
+
+            # Send as multi-move for simultaneous movement
+            self.send_multi_move(angles)
+            self.log(f"📤 Sent all servos simultaneously: {angles}")
+        except ValueError:
+            messagebox.showerror("Error", "All angles must be valid numbers")
 
     def copy_current_angles(self):
         """Copy current manual control angles to clipboard"""
@@ -1697,12 +1719,21 @@ class UnifiedControlSystem:
         # Create insert dialog
         dialog = tk.Toplevel(self.root)
         dialog.title(f"Insert Step at Position {insert_pos + 1}")
-        dialog.geometry("400x300")
+        dialog.geometry("450x350")
         dialog.transient(self.root)
         dialog.grab_set()
 
         ttk.Label(dialog, text=f"Insert Step at Position {insert_pos + 1}:",
                  font=('Helvetica', 12, 'bold')).pack(pady=10)
+
+        # Paste from clipboard button
+        paste_frame = ttk.Frame(dialog)
+        paste_frame.pack(pady=5)
+
+        ttk.Button(paste_frame, text="📌 Paste from Clipboard",
+                  command=lambda: self.paste_to_insert_dialog(angle_vars, dialog, insert_pos)).pack()
+
+        ttk.Label(dialog, text="— OR create new step —", foreground='gray').pack(pady=5)
 
         # Create angle inputs
         angle_vars = []
@@ -1739,8 +1770,23 @@ class UnifiedControlSystem:
             except ValueError:
                 messagebox.showerror("Error", "All angles must be numbers")
 
-        ttk.Button(dialog, text="Insert", command=do_insert).pack(pady=10)
+        ttk.Button(dialog, text="Insert Step", command=do_insert).pack(pady=10)
         ttk.Button(dialog, text="Cancel", command=dialog.destroy).pack()
+
+    def paste_to_insert_dialog(self, angle_vars, dialog, insert_pos):
+        """Paste clipboard angles to insert dialog"""
+        if not hasattr(self, 'step_clipboard') or not self.step_clipboard:
+            messagebox.showinfo("Info", "Clipboard is empty\n\nCopy a step first (right-click → Copy Step)")
+            return
+
+        # Use first step from clipboard
+        angles = self.step_clipboard[0]
+
+        # Set angle inputs
+        for i, var in enumerate(angle_vars):
+            var.set(str(angles[i]))
+
+        self.log(f"📋 Pasted {angles} to insert dialog")
     
     def remove_step(self):
         """Remove selected step"""
