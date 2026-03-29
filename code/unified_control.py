@@ -461,11 +461,34 @@ class UnifiedControlSystem:
         log_frame = ttk.LabelFrame(parent, text="System Log", padding="5")
         log_frame.pack(fill=tk.X, padx=5, pady=5)
 
+        # Detection status display at top (static)
+        self.detection_display_label = ttk.Label(log_frame, text="📍 Detection Status: No object detected",
+                                                  font=('Helvetica', 10, 'bold'), foreground='gray',
+                                                  relief=tk.SUNKEN, padding=5)
+        self.detection_display_label.pack(fill=tk.X, pady=(0, 5))
+
         self.log_text = scrolledtext.ScrolledText(log_frame, height=6, width=120, state='disabled')
         self.log_text.pack(fill=tk.X)
 
         # Floating log window reference
         self.floating_log_window = None
+
+    def update_detection_display(self, cell=None):
+        """Update the static detection status display"""
+        if cell and cell != '?':
+            self.detection_display_label.config(
+                text=f"📍 Detection Status: Object in {cell}",
+                foreground='green'
+            )
+        else:
+            self.detection_display_label.config(
+                text="📍 Detection Status: No object detected",
+                foreground='gray'
+            )
+
+        # Mirror to floating window if open
+        if hasattr(self, 'mirror_detection_callback') and self.mirror_detection_callback:
+            self.root.after(0, lambda c=cell: self.mirror_detection_callback(c))
 
     def open_floating_log(self):
         """Open log in separate floating window"""
@@ -480,6 +503,13 @@ class UnifiedControlSystem:
         self.floating_log_window.title("📋 System Log - Floating")
         self.floating_log_window.geometry("800x400+100+100")
         self.floating_log_window.attributes('-topmost', False)  # Not always on top
+
+        # Detection status display in floating window
+        floating_detection_label = ttk.Label(self.floating_log_window,
+                                              text="📍 Detection Status: No object detected",
+                                              font=('Helvetica', 10, 'bold'), foreground='gray',
+                                              relief=tk.SUNKEN, padding=5)
+        floating_detection_label.pack(fill=tk.X, padx=5, pady=5)
 
         # Create log text in floating window
         floating_log_text = scrolledtext.ScrolledText(self.floating_log_window, height=20, width=100, state='disabled')
@@ -503,12 +533,31 @@ class UnifiedControlSystem:
             except:
                 pass
 
+        # Mirror detection display updates
+        def mirror_detection(cell):
+            try:
+                if self.floating_log_window and self.floating_log_window.winfo_exists():
+                    if cell and cell != '?':
+                        floating_detection_label.config(
+                            text=f"📍 Detection Status: Object in {cell}",
+                            foreground='green'
+                        )
+                    else:
+                        floating_detection_label.config(
+                            text="📍 Detection Status: No object detected",
+                            foreground='gray'
+                        )
+            except:
+                pass
+
         self.mirror_log_callback = mirror_log
+        self.mirror_detection_callback = mirror_detection
 
         # Handle window close
         def on_close():
             self.floating_log_window = None
             self.mirror_log_callback = None
+            self.mirror_detection_callback = None
             self.floating_log_window.destroy()
 
         self.floating_log_window.protocol("WM_DELETE_WINDOW", on_close)
@@ -1011,9 +1060,6 @@ class UnifiedControlSystem:
                     # Use the persisted detection
                     cell = self.last_detected_cell.get('cell', '?')
 
-                    # Debug logging
-                    self.log(f"Detection: cell={cell}, has_sequence={cell in self.sequences if cell != '?' else False}, sequences={list(self.sequences.keys())}")
-
                     # Check if cell has a sequence and is A, B, or C (not D)
                     if cell and cell != '?' and cell in self.sequences and cell[0] in ['A', 'B', 'C']:
                         self.current_detection_cell = cell
@@ -1022,17 +1068,17 @@ class UnifiedControlSystem:
                             text=f"📍 Object in {cell} - Ready to pickup!",
                             foreground='green'
                         )
-                        self.log(f"✓ Pickup button enabled for {cell}")
+                        # Update static display at top of log
+                        self.update_detection_display(cell)
                     else:
                         self.current_detection_cell = None
                         self.pickup_btn.config(state='disabled')
                         if cell and cell != '?':
                             if cell[0] in ['A', 'B', 'C']:
                                 self.detection_status_label.config(
-                                    text=f"Object in {cell} (no sequence - create one first!)",
+                                    text=f"Object in {cell} (no sequence)",
                                     foreground='orange'
                                 )
-                                self.log(f"⚠ Cell {cell} has no sequence!")
                             else:
                                 self.detection_status_label.config(
                                     text=f"Object in {cell} (cell D not supported)",
@@ -1043,6 +1089,8 @@ class UnifiedControlSystem:
                                 text="Object detected (outside grid)",
                                 foreground='orange'
                             )
+                        # Update static display
+                        self.update_detection_display(cell if cell != '?' else None)
                 else:
                     self.current_detection_cell = None
                     self.pickup_btn.config(state='disabled')
@@ -1050,6 +1098,8 @@ class UnifiedControlSystem:
                         text="No object detected",
                         foreground='gray'
                     )
+                    # Update static display
+                    self.update_detection_display(None)
 
                 for obj in objects:
                     # Scale detection coordinates to display coordinates
