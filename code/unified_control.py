@@ -600,6 +600,54 @@ class UnifiedControlSystem:
         self.is_calibrated = True
         self.log(f"Grid calculated: {len(self.all_points)} points")
         messagebox.showinfo("Success", f"Grid calculated!\n\n{len(self.all_points)} points generated\n\nEmpty grid captured!\n\nNow go to Auto Detection tab to test")
+
+        # Draw digital grid lines on canvas
+        self.draw_grid_overlay()
+
+    def draw_grid_overlay(self):
+        """Draw digital grid lines on calibration canvas"""
+        if not self.is_calibrated or len(self.all_points) < 25:
+            return
+
+        # Get current frame from camera
+        ret, frame = self.cap.read()
+        if not ret:
+            return
+
+        # Draw grid lines on frame
+        for row in range(5):
+            # Draw horizontal line
+            idx1 = row * 5
+            idx2 = idx1 + 4
+            if idx2 < len(self.all_points):
+                pt1 = self.all_points[idx1]
+                pt2 = self.all_points[idx2]
+                cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
+
+        for col in range(5):
+            # Draw vertical line
+            idx1 = col
+            idx2 = col + 20
+            if idx2 < len(self.all_points):
+                pt1 = self.all_points[idx1]
+                pt2 = self.all_points[idx2]
+                cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
+
+        # Draw corner points
+        corner_colors = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (0, 255, 255)]
+        for i in range(4):
+            if i < len(self.all_points):
+                x, y = self.all_points[i]
+                cv2.circle(frame, (x, y), 10, corner_colors[i], -1)
+
+        # Convert and display
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(frame)
+        photo = ImageTk.PhotoImage(image=img)
+
+        self.calib_canvas.delete("all")
+        self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
+        self.calib_canvas.image = photo
     
     def capture_empty_grid(self):
         """Recapture empty grid"""
