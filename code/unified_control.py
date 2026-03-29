@@ -147,6 +147,7 @@ class UnifiedControlSystem:
         self._stop_sequence_flag = False
         self._current_sequence_thread = None
         self._current_pickup_thread = None
+        self._after_ids = []  # Track root.after() IDs to cancel them
 
         # Debug: Track thread activity
         self.main_thread_id = threading.current_thread().ident
@@ -1116,9 +1117,11 @@ class UnifiedControlSystem:
             self.log("⚠ Not connected to Arduino!")
             return
 
+        # CRITICAL: Cancel all pending after callbacks (prevents event queue buildup)
+        self._cancel_pending_callbacks()
+
         # Set stop flag for any currently playing sequence
         self._stop_sequence_flag = True
-        self.log("⏹️ Stopping previous sequence...")
         time.sleep(0.1)  # Give thread time to stop
 
         # Start new sequence in background thread
@@ -1127,6 +1130,21 @@ class UnifiedControlSystem:
         thread = threading.Thread(target=self._play_sequence_thread, args=(seq_name,), daemon=True)
         self._current_sequence_thread = thread
         thread.start()
+
+    def _cancel_pending_callbacks(self):
+        """Cancel all pending root.after() callbacks"""
+        for after_id in self._after_ids:
+            try:
+                self.root.after_cancel(after_id)
+            except:
+                pass
+        self._after_ids = []
+
+    def _safe_after(self, delay, callback):
+        """Schedule callback and track it for cancellation"""
+        after_id = self.root.after(delay, callback)
+        self._after_ids.append(after_id)
+        return after_id
 
     def _play_sequence_thread(self, seq_name):
         """Background thread for playing sequence with proper cleanup"""
@@ -1147,7 +1165,7 @@ class UnifiedControlSystem:
 
                     command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
                     self.send_to_arduino(command)
-                    self.root.after(0, lambda a=angles: self.log(f"  → Sent: {a}"))
+                    self._safe_after(0, lambda a=angles: self.log(f"  → Sent: {a}"))
 
                     # Wait for servo movement (minimum 0.5 seconds)
                     # Check stop flag during wait
@@ -1159,12 +1177,12 @@ class UnifiedControlSystem:
 
                     step_elapsed = time.time() - step_start
                     if step_elapsed > 0.6:
-                        self.log(f"⏱️ Step {i+1} took {step_elapsed:.3f}s")
+                        self._safe_after(0, lambda s=i+1, t=step_elapsed: self.log(f"⏱️ Step {s} took {t:.3f}s"))
 
-            self.root.after(0, lambda: self.log(f"✓ Sequence complete"))
+            self._safe_after(0, lambda: self.log(f"✓ Sequence complete"))
         except Exception as ex:
             error_msg = str(ex)
-            self.root.after(0, lambda msg=error_msg: self.log(f"✗ Error: {msg}"))
+            self._safe_after(0, lambda msg=error_msg: self.log(f"✗ Error: {msg}"))
         finally:
             # Clean up thread reference
             if hasattr(self, '_current_sequence_thread'):
@@ -1585,6 +1603,9 @@ class UnifiedControlSystem:
         if not confirm:
             return
 
+        # CRITICAL: Cancel all pending after callbacks (prevents event queue buildup)
+        self._cancel_pending_callbacks()
+
         # Execute sequence in background thread
         self.log(f"🤖 Starting pickup sequence for {cell}...")
         self.pickup_btn.config(state='disabled')
@@ -1619,7 +1640,7 @@ class UnifiedControlSystem:
                     command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
                     self.send_to_arduino(command)
 
-                    self.root.after(0, lambda s=i+1, c=cell: self.log(f"  Step {s}/{len(self.sequences[c])}: {angles}"))
+                    self._safe_after(0, lambda s=i+1, c=cell: self.log(f"  Step {s}/{len(self.sequences[c])}: {angles}"))
 
                     # Wait for servo movement (minimum 0.5 seconds)
                     wait_start = time.time()
@@ -1630,18 +1651,18 @@ class UnifiedControlSystem:
 
                     step_elapsed = time.time() - step_start
                     if step_elapsed > 0.6:
-                        self.log(f"⏱️ Step {i+1} took {step_elapsed:.3f}s")
+                        self._safe_after(0, lambda s=i+1, t=step_elapsed: self.log(f"⏱️ Step {s} took {t:.3f}s"))
 
             total_elapsed = time.time() - step_start
-            self.root.after(0, lambda c=cell: self.log(f"✓ Pickup for {c} complete! (Total: {total_elapsed:.3f}s)"))
-            self.root.after(0, lambda: self.log("🤖 Object picked up successfully!"))
+            self._safe_after(0, lambda c=cell: self.log(f"✓ Pickup for {c} complete! (Total: {total_elapsed:.3f}s)"))
+            self._safe_after(0, lambda: self.log("🤖 Object picked up successfully!"))
 
             # Recapture empty grid after successful pickup
-            self.root.after(1000, self._recapture_empty_grid_after_pickup)
+            self._safe_after(1000, self._recapture_empty_grid_after_pickup)
 
         except Exception as e:
-            self.root.after(0, lambda: self.log(f"✗ Pickup error: {e}"))
-            self.root.after(0, lambda: self.pickup_btn.config(state='normal'))
+            self._safe_after(0, lambda: self.log(f"✗ Pickup error: {e}"))
+            self._safe_after(0, lambda: self.pickup_btn.config(state='normal'))
         finally:
             # Clean up thread reference
             if hasattr(self, '_current_pickup_thread'):
