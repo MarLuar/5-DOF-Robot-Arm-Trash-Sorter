@@ -1240,6 +1240,9 @@ class UnifiedControlSystem:
                         has_seq = "✓" if c in self.sequences else ""
                         self.cell_listbox.insert(tk.END, f"{c} {has_seq}")
 
+                    # Refresh sequence listbox
+                    self.refresh_seq_list()
+
                     # Clear editor
                     self.steps_listbox.delete(0, tk.END)
                     self.selected_cell_label.config(text="None")
@@ -1297,6 +1300,9 @@ class UnifiedControlSystem:
             for c in CELL_NAMES:
                 has_seq = "✓" if c in self.sequences else ""
                 self.cell_listbox.insert(tk.END, f"{c} {has_seq}")
+
+            # Refresh sequence listbox
+            self.refresh_seq_list()
 
             dialog.destroy()
             messagebox.showinfo("Success", f"Sequence duplicated to {target}!")
@@ -1524,6 +1530,9 @@ class UnifiedControlSystem:
         for cell in CELL_NAMES:
             has_seq = "✓" if cell in self.sequences else ""
             self.cell_listbox.insert(tk.END, f"{cell} {has_seq}")
+
+        # Refresh sequence listbox in Manual Control tab
+        self.refresh_seq_list()
 
         self.log(f"✓ Saved sequence to {self.current_cell} ({len(steps)} steps)")
         messagebox.showinfo("Success", f"Sequence saved to {self.current_cell}!\n\n{len(steps)} steps")
