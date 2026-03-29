@@ -28,6 +28,12 @@ DEFAULT_SPEED = 15
 MIN_ANGLE = 0
 MAX_ANGLE = 180
 
+# Servo safe ranges (avoid problematic angles)
+BASE_SAFE_MIN = 0
+BASE_SAFE_MAX = 105  # Avoid 110-120° dead zone
+BASE_WARNING_MIN = 100
+BASE_WARNING_MAX = 125
+
 # Legacy preset positions from original robotic_arm_controller.py
 LEGACY_PRESETS = {
     'Rest': [80, 180, 50, 80, 140],
@@ -174,7 +180,7 @@ class UnifiedControlSystem:
 
             # Add warning for base servo
             if i == 0:  # Base
-                ttk.Label(frame, text="(10-170° safe)", foreground='orange', font=('Helvetica', 8)).pack(side=tk.LEFT, padx=3)
+                ttk.Label(frame, text="⚠ AVOID 110-120°!", foreground='red', font=('Helvetica', 8, 'bold')).pack(side=tk.LEFT, padx=3)
 
             btn_frame = ttk.Frame(frame)
             btn_frame.pack(side=tk.LEFT)
@@ -490,6 +496,10 @@ class UnifiedControlSystem:
                 if new_val < 10 or new_val > 170:
                     self.log(f"⚠ Warning: Base at {new_val}° (safe range: 10-170°)")
 
+                # CRITICAL: Warn about 110-120° dead zone
+                if BASE_WARNING_MIN <= new_val <= BASE_WARNING_MAX:
+                    self.log(f"🚨 DANGER: Base at {new_val}° - DEAD ZONE (110-120°) - May malfunction!")
+
             self.input_boxes[idx].set(str(new_val))
         except:
             pass
@@ -512,6 +522,11 @@ class UnifiedControlSystem:
             # Validate angle
             if angle < MIN_ANGLE or angle > MAX_ANGLE:
                 self.root.after(0, lambda: self.log(f"⚠ Invalid angle {angle}° for {JOINT_NAMES[idx]} (must be {MIN_ANGLE}-{MAX_ANGLE})"))
+                return
+
+            # CRITICAL: Block base servo from dead zone
+            if idx == 0 and BASE_WARNING_MIN <= angle <= BASE_WARNING_MAX:
+                self.root.after(0, lambda a=angle: self.log(f"🚨 BLOCKED: Base {a}° is in DEAD ZONE (110-120°)!"))
                 return
 
             command = f"{idx} {angle}\n"
@@ -574,6 +589,12 @@ class UnifiedControlSystem:
     def go_to_rest(self):
         """Go to rest position (simultaneous movement)"""
         rest_angles = LEGACY_PRESETS.get('Rest', DEFAULT_REST)
+
+        # Check if rest position has base in danger zone
+        if rest_angles[0] and BASE_WARNING_MIN <= rest_angles[0] <= BASE_WARNING_MAX:
+            self.log(f"🚨 WARNING: Rest position has base at {rest_angles[0]}° (danger zone)!")
+            self.log(f"  Consider changing Rest preset to avoid 110-120°")
+
         for i, angle in enumerate(rest_angles):
             self.input_boxes[i].set(str(angle))
         if self.is_connected:
@@ -583,6 +604,11 @@ class UnifiedControlSystem:
     def go_to_pickup(self):
         """Go to pickup position (simultaneous movement)"""
         pickup_angles = LEGACY_PRESETS.get('Pickup', DEFAULT_PICKUP)
+
+        # Check if pickup position has base in danger zone
+        if pickup_angles[0] and BASE_WARNING_MIN <= pickup_angles[0] <= BASE_WARNING_MAX:
+            self.log(f"🚨 WARNING: Pickup position has base at {pickup_angles[0]}° (danger zone)!")
+
         for i, angle in enumerate(pickup_angles):
             self.input_boxes[i].set(str(angle))
         if self.is_connected:
