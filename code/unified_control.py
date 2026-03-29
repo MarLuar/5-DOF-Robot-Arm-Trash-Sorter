@@ -122,6 +122,9 @@ class UnifiedControlSystem:
 
         # Start logging
         self.log("System initialized - v1.00.02")
+
+        # Load sequences (after UI is ready)
+        self.load_sequences()
     
     def setup_ui(self):
         """Setup main UI with notebook tabs"""
@@ -381,11 +384,19 @@ class UnifiedControlSystem:
     
     def log(self, message):
         """Add message to log"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_text.config(state='normal')
-        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
-        self.log_text.see(tk.END)
-        self.log_text.config(state='disabled')
+        try:
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            if hasattr(self, 'log_text') and self.log_text:
+                self.log_text.config(state='normal')
+                self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+                self.log_text.see(tk.END)
+                self.log_text.config(state='disabled')
+            else:
+                # Fallback: print to console
+                print(f"[{timestamp}] {message}")
+        except Exception as e:
+            # Final fallback
+            print(f"[ERROR] {message}")
     
     # Manual Control Methods
     def refresh_ports(self):
