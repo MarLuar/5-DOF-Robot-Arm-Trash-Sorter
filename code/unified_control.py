@@ -972,13 +972,13 @@ class UnifiedControlSystem:
                     loop_start = time.time()
                     self.update_calib_preview_once()
                     loop_elapsed = time.time() - loop_start
-                    if loop_elapsed > 0.2:
+                    if loop_elapsed > 0.08:
                         self.log(f"📷 Camera frame took {loop_elapsed:.3f}s")
-                    # Sleep to maintain ~2 FPS (1 frame every 0.5 seconds)
-                    time.sleep(max(0, 0.5 - loop_elapsed))
+                    # Sleep to maintain ~10 FPS (1 frame every 0.1 seconds)
+                    time.sleep(max(0, 0.1 - loop_elapsed))
                 except Exception as e:
                     self.log(f"Camera error: {e}")
-                    time.sleep(1)
+                    time.sleep(0.5)
 
         self.camera_thread = threading.Thread(target=camera_loop, daemon=True)
         self.camera_thread.start()
