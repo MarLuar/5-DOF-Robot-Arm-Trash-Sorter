@@ -532,21 +532,55 @@ class UnifiedControlSystem:
     
     def update_calib_preview(self):
         """Update calibration preview"""
-        ret, frame = self.cap.read()
-        if ret:
-            # Draw corners
-            for i, (x, y) in enumerate(self.corners):
-                color = [(0,0,255), (255,0,0), (0,255,0), (0,255,255)][i]
-                cv2.circle(frame, (x, y), 10, color, -1)
-            
+        try:
+            if not self.cap or not self.cap.isOpened():
+                self.calib_canvas.after(30, self.update_calib_preview)
+                return
+
+            ret, frame = self.cap.read()
+            if not ret:
+                self.calib_canvas.after(30, self.update_calib_preview)
+                return
+
+            # If calibrated, draw grid overlay on every frame
+            if self.is_calibrated and len(self.all_points) >= 25:
+                # Draw grid lines
+                for row in range(5):
+                    idx1 = row * 5
+                    idx2 = idx1 + 4
+                    if idx2 < len(self.all_points):
+                        pt1 = self.all_points[idx1]
+                        pt2 = self.all_points[idx2]
+                        cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
+
+                for col in range(5):
+                    idx1 = col
+                    idx2 = col + 20
+                    if idx2 < len(self.all_points):
+                        pt1 = self.all_points[idx1]
+                        pt2 = self.all_points[idx2]
+                        cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
+
+                # Draw corner points
+                corner_colors = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (0, 255, 255)]
+                for i in range(4):
+                    if i < len(self.all_points):
+                        x, y = self.all_points[i]
+                        cv2.circle(frame, (x, y), 10, corner_colors[i], -1)
+
+            # Convert BGR to RGB
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame)
             photo = ImageTk.PhotoImage(image=img)
-            
+
+            self.calib_canvas.delete("all")
             self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
             self.calib_canvas.image = photo
-        
-        self.calib_canvas.after(30, self.update_calib_preview)
+
+            self.calib_canvas.after(30, self.update_calib_preview)
+        except Exception as e:
+            self.log(f"Preview error: {e}")
+            self.calib_canvas.after(1000, self.update_calib_preview)
     
     def on_calib_click(self, event):
         """Handle calibration click"""
@@ -600,10 +634,9 @@ class UnifiedControlSystem:
         self.is_calibrated = True
         self.log(f"Grid calculated: {len(self.all_points)} points")
 
-        # Draw grid overlay immediately
-        self.draw_grid_overlay()
+        # Grid overlay will now be drawn automatically by update_calib_preview
 
-        messagebox.showinfo("Success", f"Grid calculated!\n\n{len(self.all_points)} points generated\n\nEmpty grid captured!\n\nGrid lines should now be visible!\n\nGo to Auto Detection tab to test")
+        messagebox.showinfo("Success", f"Grid calculated!\n\n{len(self.all_points)} points generated\n\nEmpty grid captured!\n\nGrid lines are now visible on the camera preview!\n\nGo to Auto Detection tab to test")
 
     def draw_grid_overlay(self):
         """Draw digital grid lines on calibration canvas"""
