@@ -1,6 +1,6 @@
 # 🤖 5-DOF Robotic Arm Vision Pickup - Project Todo List
 
-## ✅ COMPLETED
+##  COMPLETED
 
 - [x] Robotic arm controller GUI (manual control)
   - Input boxes for each servo (Base, Shoulder, Elbow, Wrist, Gripper)
@@ -27,7 +27,7 @@
 
 ---
 
-## 🎯 PHASE 1: Vision System Setup (PRIORITY: HIGH)
+##  PHASE 1: Vision System Setup (PRIORITY: HIGH)
 
 ### 1.1 Complete Calibration
 - [ ] **Fix grid calibration accuracy**
@@ -58,7 +58,7 @@
 
 ---
 
-## 🚀 PHASE 2: Vision Pickup Integration (PRIORITY: HIGH)
+##  PHASE 2: Vision Pickup Integration (PRIORITY: HIGH)
 
 ### 2.1 Create Vision Pickup Script
 - [ ] **Create `vision_pickup_cell_based.py`**
@@ -85,7 +85,7 @@
 
 ---
 
-## 🎨 PHASE 3: GUI Integration (PRIORITY: MEDIUM)
+##  PHASE 3: GUI Integration (PRIORITY: MEDIUM)
 
 ### 3.1 Unified Control Interface
 - [ ] **Integrate vision into main GUI**
@@ -111,7 +111,7 @@
 
 ---
 
-## 📊 PHASE 4: Testing & Optimization (PRIORITY: MEDIUM)
+##  PHASE 4: Testing & Optimization (PRIORITY: MEDIUM)
 
 ### 4.1 Accuracy Testing
 - [ ] **Test pickup accuracy**
@@ -137,7 +137,7 @@
 
 ---
 
-## 📝 PHASE 5: Documentation (PRIORITY: LOW)
+##  PHASE 5: Documentation (PRIORITY: LOW)
 
 ### 5.1 User Manual
 - [ ] **Write user instructions**
@@ -162,7 +162,7 @@
 
 ---
 
-## 🎓 PHASE 6: Capstone Presentation (PRIORITY: LOW)
+##  PHASE 6: Capstone Presentation (PRIORITY: LOW)
 
 ### 6.1 Presentation Materials
 - [ ] **Prepare slides**
@@ -211,7 +211,7 @@
 
 ---
 
-## 📞 NEED HELP WITH?
+##  NEED HELP WITH?
 
 - [ ] Calibration accuracy
 - [ ] Sequence recording

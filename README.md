@@ -1,18 +1,18 @@
-# 🤖 5-DOF Robotic Arm with Computer Vision Pickup
+#  5-DOF Robotic Arm with Computer Vision Pickup
 
 **Capstone Project - Automated Trash Pickup System**
 
 ---
 
-## 📋 Project Overview
+##  Project Overview
 
 This system enables a 5-DOF robotic arm to automatically detect and pickup trash using computer vision. The arm identifies colored objects on a 4x4 grid platform and executes pre-recorded pickup sequences for each cell.
 
 ---
 
-## 🎯 Features
+##  Features
 
-### ✅ Completed
+###  Completed
 - [x] Manual robotic arm control GUI
 - [x] Sequence builder (create, save, load, play sequences)
 - [x] Speed control for servo movements
@@ -23,7 +23,7 @@ This system enables a 5-DOF robotic arm to automatically detect and pickup trash
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 5DOF_Robotic_Arm_Vision/
@@ -51,7 +51,7 @@ This system enables a 5-DOF robotic arm to automatically detect and pickup trash
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Setup
 
@@ -75,7 +75,7 @@ python3 simple_grid_calib.py
 3. Bottom-Left (Green)
 4. Bottom-Right (Yellow)
 
-Click "✨ Calculate Grid" → Verify overlay → Click "💾 Save Calibration"
+Click " Calculate Grid" → Verify overlay → Click " Save Calibration"
 
 ### 3. Record Cell Sequences
 
@@ -99,7 +99,7 @@ python3 robotic_arm_controller.py
 
 ---
 
-## 🎯 System Workflow
+##  System Workflow
 
 ```
 1. Calibrate Grid (4 clicks)
@@ -122,7 +122,7 @@ python3 robotic_arm_controller.py
 
 ---
 
-## 🔧 Hardware Requirements
+##  Hardware Requirements
 
 | Component | Specification | Notes |
 |-----------|---------------|-------|
@@ -158,7 +158,7 @@ arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:avr:nano firmware/5dof_robotic
 
 ---
 
-## 📊 Configuration
+##  Configuration
 
 ### Grid Configuration (Default)
 ```python
@@ -189,7 +189,7 @@ TOTAL_SIZE = "20cm x 20cm"
 
 ---
 
-## 🧪 Testing
+##  Testing
 
 ### Calibration Accuracy Test
 ```bash
@@ -275,13 +275,13 @@ python3 -c "import cv2; c=cv2.VideoCapture(0); print(c.read()[0])"
 
 ---
 
-## 📄 License
+##  License
 
 This project is part of a capstone requirement. All rights reserved.
 
 ---
 
-## 🙏 Acknowledgments
+##  Acknowledgments
 
 - Arduino community for servo control libraries
 - OpenCV for computer vision tools

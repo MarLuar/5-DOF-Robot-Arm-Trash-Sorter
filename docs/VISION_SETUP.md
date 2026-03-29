@@ -1,12 +1,12 @@
 # 5-DOF Robotic Arm - Computer Vision Setup
 
-## 📋 Prerequisites
+##  Prerequisites
 
 ```bash
 pip3 install opencv-python numpy pillow --break-system-packages
 ```
 
-## 🎯 Step-by-Step Guide
+##  Step-by-Step Guide
 
 ### Step 1: Adjust Camera Settings
 
@@ -84,7 +84,7 @@ vision = VisionPickup(camera_index=0)
 vision.auto_pickup_sequence(arm_controller=arm)
 ```
 
-## 📁 Files Created
+##  Files Created
 
 | File | Purpose |
 |------|---------|
@@ -121,7 +121,7 @@ python3 -c "import cv2; cap=cv2.VideoCapture(0); print(cap.read()[1].shape)"
 - Measure actual grid cell size
 - Update `GRID_CONFIG` in calibration script
 
-## 🎨 Customizing Trash Detection
+##  Customizing Trash Detection
 
 Edit `TRASH_COLORS` in `vision_pickup.py`:
 
@@ -139,7 +139,7 @@ TRASH_COLORS = {
 }
 ```
 
-## 💡 Tips
+##  Tips
 
 1. **Lighting is critical** - Use consistent, even lighting
 2. **High contrast markers** - Bright colors on dark grid (or vice versa)
