@@ -277,10 +277,10 @@ class UnifiedControlSystem:
 
         ttk.Separator(preset_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
 
-        # Copy current angles
+        # Copy/Paste angles
         ttk.Label(preset_frame, text="Current Angles:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
         ttk.Button(preset_frame, text="📋 Copy Current Angles", command=self.copy_current_angles).pack(fill=tk.X, pady=2)
-        ttk.Button(preset_frame, text="📌 Paste to Sequences", command=self.paste_to_sequences).pack(fill=tk.X, pady=2)
+        ttk.Button(preset_frame, text="📌 Paste to Manual Control", command=self.paste_to_manual).pack(fill=tk.X, pady=2)
 
         # Speed
         speed_frame = ttk.LabelFrame(right_frame, text="Movement Speed", padding="5")
@@ -851,24 +851,23 @@ class UnifiedControlSystem:
         angles = [int(self.input_boxes[i].get()) for i in range(5)]
         self.step_clipboard = [angles]
         self.log(f"📋 Copied current angles: {angles}")
-        messagebox.showinfo("Copied!", f"Current angles copied to clipboard:\n{angles}\n\nGo to Sequence Editor and click '📌 Paste Step' to paste")
+        messagebox.showinfo("Copied!", f"Current angles copied to clipboard:\n{angles}\n\nYou can now paste these angles into sequence steps")
 
-    def paste_to_sequences(self):
-        """Paste clipboard angles to sequence editor"""
+    def paste_to_manual(self):
+        """Paste clipboard angles to manual control input boxes"""
         if not hasattr(self, 'step_clipboard') or not self.step_clipboard:
-            messagebox.showinfo("Info", "Clipboard is empty\n\nCopy a step first from Sequence Editor")
+            messagebox.showinfo("Info", "Clipboard is empty\n\nCopy a step first from Sequence Editor (right-click → Copy Step)")
             return
 
-        if not self.current_cell:
-            messagebox.showwarning("Warning", "Select a cell in Sequence Editor first")
-            return
+        # Use first step from clipboard
+        angles = self.step_clipboard[0]
 
-        # Insert at end of current steps
-        for angles in self.step_clipboard:
-            self.steps_listbox.insert(tk.END, f"{self.steps_listbox.size() + 1}. {angles}")
+        # Set input boxes
+        for i in range(5):
+            self.input_boxes[i].set(str(angles[i]))
 
-        self.renumber_steps()
-        self.log(f"📌 Pasted {len(self.step_clipboard)} step(s) to {self.current_cell}")
+        self.log(f"📌 Pasted to Manual Control: {angles}")
+        messagebox.showinfo("Pasted!", f"Angles pasted to Manual Control:\n{angles}\n\nClick 'Send' on any servo to move to this position")
 
     def start_arduino_worker(self):
         """Start Arduino command worker thread"""
@@ -1683,30 +1682,11 @@ class UnifiedControlSystem:
         self.steps_listbox.insert(tk.END, f"{self.steps_listbox.size()+1}. {DEFAULT_REST}")
 
     def insert_step(self):
-        """Insert step at selected position or paste from clipboard"""
+        """Insert step at selected position"""
         if not self.current_cell:
             messagebox.showwarning("Warning", "Select a cell first")
             return
 
-        # Check if clipboard has steps to paste
-        if hasattr(self, 'step_clipboard') and self.step_clipboard:
-            # Ask user if they want to paste or create new
-            result = messagebox.askyesno("Paste or Create?",
-                "Clipboard has steps.\n\nYes = Paste from clipboard\nNo = Create new step")
-
-            if result:  # Paste from clipboard
-                selection = self.steps_listbox.curselection()
-                insert_pos = selection[0] if selection else tk.END
-
-                for angles in self.step_clipboard:
-                    self.steps_listbox.insert(insert_pos if insert_pos != tk.END else tk.END,
-                                             f"{self.steps_listbox.size() + 1}. {angles}")
-
-                self.renumber_steps()
-                self.log(f"📌 Inserted {len(self.step_clipboard)} step(s) from clipboard")
-                return
-
-        # Create new step dialog
         selection = self.steps_listbox.curselection()
         if not selection:
             messagebox.showwarning("Warning", "Select where to insert the step")
