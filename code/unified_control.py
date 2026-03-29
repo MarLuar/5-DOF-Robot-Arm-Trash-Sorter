@@ -164,7 +164,17 @@ class UnifiedControlSystem:
         """Setup main UI with notebook tabs"""
         main_frame = ttk.Frame(self.root, padding="5")
         main_frame.pack(fill=tk.BOTH, expand=True)
-        
+
+        # Top bar with floating log button
+        top_bar = ttk.Frame(main_frame)
+        top_bar.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Label(top_bar, text="5-DOF Robotic Arm - Unified Control System v1.00.02",
+                 font=('Helvetica', 12, 'bold')).pack(side=tk.LEFT)
+
+        ttk.Button(top_bar, text="🪟 Open Floating Log Window",
+                  command=self.open_floating_log).pack(side=tk.RIGHT, padx=5)
+
         # Create notebook for tabs
         self.notebook = ttk.Notebook(main_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True)
@@ -446,19 +456,12 @@ class UnifiedControlSystem:
         ttk.Button(right_frame, text="Play Sequence", command=self.test_sequence).pack(fill=tk.X, pady=10)
     
     def setup_log_panel(self, parent):
-        """Setup shared log panel with floating window option"""
+        """Setup shared log panel"""
         log_frame = ttk.LabelFrame(parent, text="System Log", padding="5")
         log_frame.pack(fill=tk.X, padx=5, pady=5)
 
         self.log_text = scrolledtext.ScrolledText(log_frame, height=6, width=120, state='disabled')
-        self.log_text.pack(fill=tk.X, pady=(0, 5))
-
-        # Button to open floating log window - more visible placement
-        btn_frame = ttk.Frame(log_frame)
-        btn_frame.pack(fill=tk.X)
-
-        ttk.Separator(log_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
-        ttk.Button(btn_frame, text="🪟 Open Floating Log Window", command=self.open_floating_log).pack(side=tk.LEFT, padx=5, pady=5)
+        self.log_text.pack(fill=tk.X)
 
         # Floating log window reference
         self.floating_log_window = None
