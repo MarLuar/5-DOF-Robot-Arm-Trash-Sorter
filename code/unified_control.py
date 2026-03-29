@@ -140,6 +140,8 @@ class UnifiedControlSystem:
         self.serial_lock = threading.Lock()  # Thread-safe serial access
         self.frame_count = 0  # For frame skipping
         self.camera_running = False  # Camera thread control
+        self.canvas_width = 640  # Cache canvas size
+        self.canvas_height = 480  # Cache canvas size
 
         # Debug: Track thread activity
         self.main_thread_id = threading.current_thread().ident
@@ -160,6 +162,10 @@ class UnifiedControlSystem:
 
         # Start camera thread
         self.start_camera_thread()
+
+        # Update canvas size cache periodically (from main thread)
+        self.root.after(1000, self.update_canvas_size_cache)
+        self.root.after(5000, self.update_canvas_size_cache)  # Update again after 5s
 
         # Auto-go to rest position after short delay (when connected)
         self.root.after(2000, self.auto_go_to_rest_on_startup)
@@ -922,9 +928,10 @@ class UnifiedControlSystem:
                     loop_start = time.time()
                     self.update_calib_preview_once()
                     loop_elapsed = time.time() - loop_start
-                    if loop_elapsed > 0.5:
+                    if loop_elapsed > 0.3:
                         self.log(f"📷 Camera frame took {loop_elapsed:.3f}s")
-                    time.sleep(max(0, 1.0 - loop_elapsed))  # Maintain 1 FPS
+                    # Sleep to maintain ~0.5 FPS (1 frame every 2 seconds)
+                    time.sleep(max(0, 2.0 - loop_elapsed))
                 except Exception as e:
                     self.log(f"Camera error: {e}")
                     time.sleep(2)
@@ -934,7 +941,7 @@ class UnifiedControlSystem:
         self.log("Camera thread started")
 
     def update_calib_preview_once(self):
-        """Update calibration preview once (called from camera thread)"""
+        """Update calibration preview once (called from camera thread) - OPTIMIZED"""
         try:
             if not self.cap or not self.cap.isOpened():
                 return
@@ -943,14 +950,14 @@ class UnifiedControlSystem:
             if not ret:
                 return
 
-            # Get canvas size (must be called from main thread)
-            canvas_width = self.calib_canvas.winfo_width()
-            canvas_height = self.calib_canvas.winfo_height()
+            # Use cached canvas size (updated periodically from main thread)
+            canvas_width = self.canvas_width
+            canvas_height = self.canvas_height
 
             if canvas_width < 2 or canvas_height < 2:
                 return
 
-            # Get frame dimensions
+            # Get frame dimensions - reduce resolution for faster processing
             frame_height, frame_width = frame.shape[:2]
 
             # Calculate scale to fit canvas (maintain aspect ratio)
@@ -964,7 +971,7 @@ class UnifiedControlSystem:
             if new_width < 1 or new_height < 1:
                 return
 
-            # Resize
+            # Resize (smaller = faster)
             display_frame = cv2.resize(frame, (new_width, new_height))
 
             # Create black background
@@ -1029,6 +1036,14 @@ class UnifiedControlSystem:
 
         except Exception as e:
             self.log(f"Preview error: {e}")
+
+    def update_canvas_size_cache(self):
+        """Update cached canvas size from main thread"""
+        try:
+            self.canvas_width = self.calib_canvas.winfo_width()
+            self.canvas_height = self.calib_canvas.winfo_height()
+        except:
+            pass
 
     def _update_canvas_image(self, photo):
         """Update canvas with new image (called from main thread)"""
