@@ -121,11 +121,15 @@ class UnifiedControlSystem:
         self.threshold_var = tk.IntVar(value=35)
         self.min_area_var = tk.IntVar(value=3000)
         self.solidity_var = tk.DoubleVar(value=0.5)
-        
+
         # Auto-detection
         self.auto_detect_enabled = False
         self.detection_count = 0
         self.last_cell = "N/A"
+
+        # Track detected objects for pickup
+        self.detected_objects = []  # List of detected objects with cell info
+        self.current_detection_cell = None  # Cell with detected object
         
         # Setup UI
         self.setup_ui()
@@ -276,7 +280,7 @@ class UnifiedControlSystem:
         # Buttons
         btn_frame = ttk.Frame(left_frame)
         btn_frame.pack(fill=tk.X, pady=10)
-        
+
         ttk.Button(btn_frame, text="Reset", command=self.reset_calibration).pack(side=tk.LEFT, padx=5)
         self.calc_btn = ttk.Button(btn_frame, text="Calculate Grid", command=self.calculate_grid, state='disabled')
         self.calc_btn.pack(side=tk.LEFT, padx=5)
@@ -287,6 +291,14 @@ class UnifiedControlSystem:
         ttk.Checkbutton(btn_frame, text="Show Object Detection",
                        variable=self.detect_in_calib_var,
                        command=self.toggle_detection_in_calib).pack(side=tk.LEFT, padx=10)
+
+        # Pickup button (initially disabled)
+        self.pickup_btn = ttk.Button(btn_frame, text="🤖 PICKUP OBJECT", command=self.pickup_detected_object, state='disabled')
+        self.pickup_btn.pack(side=tk.LEFT, padx=10)
+
+        # Detection status label
+        self.detection_status_label = ttk.Label(btn_frame, text="No object detected", foreground='gray')
+        self.detection_status_label.pack(side=tk.LEFT, padx=10)
 
         # Right: Instructions & Sensitivity
         right_frame = ttk.Frame(self.calib_tab)
@@ -311,10 +323,15 @@ class UnifiedControlSystem:
    - Shows which cell object is in
    - Logs position coordinates
 
-4. Place object on grid
+4. Place object on grid (Cells A-C)
    - See which cell it's detected in
    - Yellow boxes show detections
    - Check System Log for coordinates
+
+5. Click "🤖 PICKUP OBJECT"
+   - Executes sequence for that cell
+   - Automatically picks up object
+   - Status shows pickup progress
 """
         ttk.Label(instr_frame, text=instructions, justify=tk.LEFT).pack(anchor='w')
 
@@ -877,6 +894,44 @@ class UnifiedControlSystem:
             # Object detection - draw detected objects (if enabled and empty grid is available)
             if self.detect_in_calib_var.get() and hasattr(self, 'empty_grid') and self.empty_grid is not None:
                 objects = self.detect_objects(frame)
+
+                # Track detected objects and enable pickup button
+                self.detected_objects = objects
+
+                if objects:
+                    # Get the cell with the largest object (most prominent)
+                    largest_obj = max(objects, key=lambda o: o['area'])
+                    cell = self.find_cell(largest_obj['cx'], largest_obj['cy'])
+
+                    # Check if cell has a sequence and is A, B, or C (not D)
+                    if cell and cell in self.sequences and cell[0] in ['A', 'B', 'C']:
+                        self.current_detection_cell = cell
+                        self.pickup_btn.config(state='normal')
+                        self.detection_status_label.config(
+                            text=f"📍 Object in {cell} - Ready to pickup!",
+                            foreground='green'
+                        )
+                    else:
+                        self.current_detection_cell = None
+                        self.pickup_btn.config(state='disabled')
+                        if cell:
+                            self.detection_status_label.config(
+                                text=f"Object in {cell} (no sequence)",
+                                foreground='orange'
+                            )
+                        else:
+                            self.detection_status_label.config(
+                                text="Object detected (outside grid)",
+                                foreground='orange'
+                            )
+                else:
+                    self.current_detection_cell = None
+                    self.pickup_btn.config(state='disabled')
+                    self.detection_status_label.config(
+                        text="No object detected",
+                        foreground='gray'
+                    )
+
                 for obj in objects:
                     # Scale detection coordinates to display coordinates
                     disp_x = int(obj['x'] * scale) + x_offset
@@ -1068,6 +1123,86 @@ class UnifiedControlSystem:
             self.log("Object detection enabled in calibration tab")
         else:
             self.log("Object detection disabled in calibration tab")
+            # Clear detection state
+            self.detected_objects = []
+            self.current_detection_cell = None
+            self.pickup_btn.config(state='disabled')
+            self.detection_status_label.config(text="No object detected", foreground='gray')
+
+    def pickup_detected_object(self):
+        """Execute sequence for detected object"""
+        if not self.current_detection_cell:
+            messagebox.showwarning("Warning", "No object detected!")
+            return
+
+        cell = self.current_detection_cell
+
+        if cell not in self.sequences:
+            messagebox.showwarning("Warning", f"No sequence saved for {cell}!")
+            return
+
+        if not self.is_connected:
+            messagebox.showerror("Error", "Not connected to Arduino!")
+            return
+
+        # Confirm pickup
+        confirm = messagebox.askyesno(
+            "Confirm Pickup",
+            f"Execute sequence for {cell} to pickup object?\n\n"
+            f"This will run {len(self.sequences[cell])} steps."
+        )
+
+        if not confirm:
+            return
+
+        # Execute sequence in background thread
+        self.log(f"🤖 Starting pickup sequence for {cell}...")
+        self.pickup_btn.config(state='disabled')
+
+        thread = threading.Thread(target=self._execute_pickup_sequence, args=(cell,), daemon=True)
+        thread.start()
+
+    def _execute_pickup_sequence(self, cell):
+        """Execute pickup sequence in background thread"""
+        try:
+            for i, step in enumerate(self.sequences[cell]):
+                if 'angles' in step:
+                    angles = step['angles']
+                    delay = step.get('delay', 1000)
+
+                    # Send multi-move command
+                    command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
+
+                    if self.serial_conn and self.serial_conn.is_open:
+                        self.serial_conn.reset_input_buffer()
+                        self.serial_conn.reset_output_buffer()
+                        self.serial_conn.write(command.encode())
+                        self.serial_conn.flush()
+
+                        self.root.after(0, lambda s=i+1, c=cell: self.log(f"  Step {s}/{len(self.sequences[c])}: {angles}"))
+                        time.sleep(delay / 1000.0)
+
+            self.root.after(0, lambda c=cell: self.log(f"✓ Pickup sequence for {c} complete!"))
+            self.root.after(0, lambda: self.log("🤖 Object picked up successfully!"))
+
+            # Clear detection after successful pickup
+            self.root.after(2000, self._clear_detection_after_pickup)
+
+        except Exception as e:
+            self.root.after(0, lambda: self.log(f"✗ Pickup error: {e}"))
+            self.root.after(0, lambda: self.pickup_btn.config(state='normal'))
+
+    def _clear_detection_after_pickup(self):
+        """Clear detection state after successful pickup"""
+        self.detected_objects = []
+        self.current_detection_cell = None
+        self.pickup_btn.config(state='disabled')
+        self.detection_status_label.config(text="Pickup complete!", foreground='green')
+
+        # Reset status after 3 seconds
+        self.root.after(3000, lambda: self.detection_status_label.config(
+            text="No object detected", foreground='gray'
+        ))
     
     def update_sensitivity_labels(self):
         """Update sensitivity labels"""
