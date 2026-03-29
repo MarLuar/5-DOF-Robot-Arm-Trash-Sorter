@@ -479,8 +479,8 @@ class UnifiedControlSystem:
         self.status_label.config(text="Status: Connected", foreground='green')
         self.log(f"✓ Connected to {port}")
 
-        # Go to rest position automatically
-        self.log("Moving to rest position...")
+        # ALWAYS go to rest position when (re)connected - prevents struggling
+        self.log("Moving to rest position (prevents struggling)...")
         self.go_to_rest()
 
     def _on_connect_error(self, error):
@@ -499,6 +499,30 @@ class UnifiedControlSystem:
         self.connect_btn.config(text="Connect")
         self.status_label.config(text="Status: Disconnected", foreground='red')
         self.log("Disconnected")
+
+        # Start monitoring for reconnection
+        self.root.after(1000, self._monitor_reconnection)
+
+    def _monitor_reconnection(self):
+        """Monitor for Arduino reconnection and auto-go to rest"""
+        if not self.is_connected:
+            port = self.port_var.get()
+            if ' - ' in port:
+                port = port.split(' - ')[0]
+
+            # Try to reconnect
+            try:
+                test_conn = serial.Serial(port, BAUD_RATE, timeout=0.1)
+                test_conn.close()
+                # Arduino is back! Trigger reconnection
+                self.log("🔌 Arduino reconnected! Going to rest position...")
+                self.connect()
+                return
+            except:
+                pass  # Not connected yet
+
+            # Keep monitoring
+            self.root.after(1000, self._monitor_reconnection)
     
     def adjust_servo(self, idx, delta):
         """Adjust servo angle with validation"""
