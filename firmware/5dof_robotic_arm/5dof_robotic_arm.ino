@@ -11,7 +11,7 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 int SERVO_SPEED = 15;  // Default: 15ms/deg (lower = faster)
 
 // Store current angles
-int currentAngles[5] = {150, 0, 70, 70, 140};  // Default rest position
+int currentAngles[5] = {80, 70, 50, 125, 0};  // Rest position on power-up (prevents struggling)
 const char* jointNames[] = {"Base", "Shoulder", "Elbow", "Wrist", "Gripper"};
 
 void setup() {
@@ -27,11 +27,14 @@ void setup() {
   pwm.setOscillatorFrequency(27000000);
   pwm.setPWMFreq(SERVO_FREQ);
 
-  // Initialize servos to 70 degrees
+  // CRITICAL: Initialize servos to REST POSITION on power-up (prevents struggling)
+  Serial.println("Initializing to rest position [80, 70, 50, 125, 0]...");
   for(int i=0; i<5; i++) {
     moveServo(i, currentAngles[i]);
+    delay(50);  // Small delay between servos to prevent power spike
   }
   delay(500);
+  Serial.println("✓ Initialized to rest position");
   displayPositions();
 }
 
