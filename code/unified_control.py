@@ -34,10 +34,14 @@ BASE_SAFE_MAX = 105  # Avoid 110-120° dead zone
 BASE_WARNING_MIN = 100
 BASE_WARNING_MAX = 125
 
+# Default preset positions (user-modifiable)
+DEFAULT_REST = [80, 70, 50, 125, 0]  # Base:80, Shoulder:70, Elbow:50, Wrist:125, Gripper:0
+DEFAULT_PICKUP = [80, 74, 50, 5, 140]
+
 # Legacy preset positions from original robotic_arm_controller.py
 LEGACY_PRESETS = {
-    'Rest': [80, 180, 50, 80, 140],
-    'Pickup': [80, 74, 50, 5, 140],
+    'Rest': DEFAULT_REST.copy(),  # User-modifiable
+    'Pickup': DEFAULT_PICKUP.copy(),  # User-modifiable
     'LEFT DROP': [170, 100, 70, 30, 140],
     'DOWN': [80, 60, 30, 30, 0],
     'GRAB': [80, 74, 50, 5, 0],
@@ -81,8 +85,10 @@ DEFAULT_PICKUP = [80, 100, 20, 0, 0]
 JOINT_NAMES = ["Base", "Shoulder", "Elbow", "Wrist", "Gripper"]
 CELL_NAMES = [f"{chr(ord('A')+row)}{col+1}" for row in range(4) for col in range(4)]
 
+# File paths
 CALIBRATION_FILE = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/vision_calibration.json'
 SEQUENCES_FILE = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/sequences/cell_sequences.json'
+PRESETS_FILE = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/servo_presets.json'
 BG_FILE = '/home/koogs/empty_grid_reference.jpg'
 
 
@@ -125,12 +131,16 @@ class UnifiedControlSystem:
         self.setup_ui()
         self.refresh_ports()
         self.load_calibration()
+        self.load_presets()  # Load user-modified presets
 
         # Start logging
         self.log("System initialized - v1.00.02")
 
         # Load sequences (after UI is ready)
         self.load_sequences()
+
+        # Auto-go to rest position after short delay (when connected)
+        self.root.after(2000, self.auto_go_to_rest_on_startup)
     
     def setup_ui(self):
         """Setup main UI with notebook tabs"""
@@ -381,8 +391,13 @@ class UnifiedControlSystem:
 
         ttk.Separator(right_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
 
-        ttk.Label(right_frame, text="Test:").pack(anchor='w')
-        ttk.Button(right_frame, text="Play Sequence", command=self.test_sequence).pack(fill=tk.X, pady=2)
+        ttk.Label(right_frame, text="Set Custom Presets:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
+        ttk.Label(right_frame, text="Move servos to desired position,", font=('Helvetica', 8)).pack(anchor='w')
+        ttk.Label(right_frame, text="then click to save:", font=('Helvetica', 8)).pack(anchor='w')
+        ttk.Button(right_frame, text="Set Current as Rest", command=self.set_current_as_rest).pack(fill=tk.X, pady=2)
+        ttk.Button(right_frame, text="Set Current as Pickup", command=self.set_current_as_pickup).pack(fill=tk.X, pady=2)
+
+        ttk.Button(right_frame, text="Play Sequence", command=self.test_sequence).pack(fill=tk.X, pady=10)
     
     def setup_log_panel(self, parent):
         """Setup shared log panel"""
@@ -962,8 +977,52 @@ class UnifiedControlSystem:
         )
     
     # Sequence Methods
+    def load_presets(self):
+        """Load user-modified presets from file"""
+        if os.path.exists(PRESETS_FILE):
+            try:
+                with open(PRESETS_FILE, 'r') as f:
+                    saved_presets = json.load(f)
+
+                # Update LEGACY_PRESETS with saved values
+                for name, angles in saved_presets.items():
+                    if name in LEGACY_PRESETS:
+                        LEGACY_PRESETS[name] = angles
+                        self.log(f"✓ Loaded preset: {name} = {angles}")
+
+                # Update defaults
+                if 'Rest' in saved_presets:
+                    DEFAULT_REST[:] = saved_presets['Rest']
+                if 'Pickup' in saved_presets:
+                    DEFAULT_PICKUP[:] = saved_presets['Pickup']
+
+            except Exception as e:
+                self.log(f"⚠ Could not load presets: {e}")
+        else:
+            self.log("Using default presets")
+
+    def save_presets(self):
+        """Save current presets to file"""
+        try:
+            presets_to_save = {
+                'Rest': LEGACY_PRESETS['Rest'],
+                'Pickup': LEGACY_PRESETS['Pickup']
+            }
+            with open(PRESETS_FILE, 'w') as f:
+                json.dump(presets_to_save, f, indent=2)
+            self.log(f"✓ Presets saved to {PRESETS_FILE}")
+        except Exception as e:
+            self.log(f"✗ Could not save presets: {e}")
+
+    def auto_go_to_rest_on_startup(self):
+        """Auto-go to rest position on startup if connected"""
+        if self.is_connected:
+            self.log("Auto-going to rest position on startup...")
+            self.go_to_rest()
+        else:
+            self.log("Not connected - skipping auto-rest")
+
     def load_sequences(self):
-        """Load sequences including legacy sequences"""
         # First load legacy sequences
         self.log("Loading legacy sequences...")
         for seq_name, steps in LEGACY_SEQUENCES.items():
@@ -1079,24 +1138,36 @@ class UnifiedControlSystem:
         messagebox.showinfo("Success", f"Sequence saved to {self.current_cell}!\n\n{len(steps)} steps")
     
     def load_rest_preset(self):
-        """Load rest position from legacy presets"""
-        if 'Rest' in LEGACY_PRESETS:
-            for i, angle in enumerate(LEGACY_PRESETS['Rest']):
-                self.input_boxes[i].set(str(angle))
-            self.log("Loaded legacy Rest position")
-        else:
-            for i, angle in enumerate(DEFAULT_REST):
-                self.input_boxes[i].set(str(angle))
+        """Load rest position from presets"""
+        angles = LEGACY_PRESETS.get('Rest', DEFAULT_REST)
+        for i, angle in enumerate(angles):
+            self.input_boxes[i].set(str(angle))
+        self.log(f"Loaded Rest position: {angles}")
 
     def load_pickup_preset(self):
-        """Load pickup position from legacy presets"""
-        if 'Pickup' in LEGACY_PRESETS:
-            for i, angle in enumerate(LEGACY_PRESETS['Pickup']):
-                self.input_boxes[i].set(str(angle))
-            self.log("Loaded legacy Pickup position")
-        else:
-            for i, angle in enumerate(DEFAULT_PICKUP):
-                self.input_boxes[i].set(str(angle))
+        """Load pickup position from presets"""
+        angles = LEGACY_PRESETS.get('Pickup', DEFAULT_PICKUP)
+        for i, angle in enumerate(angles):
+            self.input_boxes[i].set(str(angle))
+        self.log(f"Loaded Pickup position: {angles}")
+
+    def set_current_as_rest(self):
+        """Set current servo positions as new Rest preset"""
+        angles = [int(self.input_boxes[i].get()) for i in range(5)]
+        LEGACY_PRESETS['Rest'] = angles
+        DEFAULT_REST[:] = angles
+        self.log(f"✓ Rest position updated to: {angles}")
+        self.save_presets()
+        messagebox.showinfo("Rest Updated", f"New Rest position saved:\n{angles}\n\nThis will persist after restart!")
+
+    def set_current_as_pickup(self):
+        """Set current servo positions as new Pickup preset"""
+        angles = [int(self.input_boxes[i].get()) for i in range(5)]
+        LEGACY_PRESETS['Pickup'] = angles
+        DEFAULT_PICKUP[:] = angles
+        self.log(f"✓ Pickup position updated to: {angles}")
+        self.save_presets()
+        messagebox.showinfo("Pickup Updated", f"New Pickup position saved:\n{angles}\n\nThis will persist after restart!")
     
     def test_sequence(self):
         """Test current sequence"""
