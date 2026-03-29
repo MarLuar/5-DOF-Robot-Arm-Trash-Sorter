@@ -107,12 +107,7 @@ class UnifiedControlSystem:
         self.seq_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.seq_tab, text="Cell Sequences")
         self.setup_sequences_tab()
-        
-        # Tab 4: Auto Detection
-        self.auto_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.auto_tab, text="Auto Detection")
-        self.setup_auto_tab()
-        
+
         # Log panel (shared across all tabs)
         self.setup_log_panel(main_frame)
     
@@ -249,10 +244,12 @@ class UnifiedControlSystem:
 3. Enable "Show Object Detection"
    - Detects objects in real-time
    - Shows which cell object is in
+   - Logs position coordinates
 
 4. Place object on grid
    - See which cell it's detected in
    - Yellow boxes show detections
+   - Check System Log for coordinates
 """
         ttk.Label(instr_frame, text=instructions, justify=tk.LEFT).pack(anchor='w')
 
@@ -327,64 +324,6 @@ class UnifiedControlSystem:
         
         ttk.Label(right_frame, text="Test:").pack(anchor='w')
         ttk.Button(right_frame, text="Play Sequence", command=self.test_sequence).pack(fill=tk.X, pady=2)
-    
-    def setup_auto_tab(self):
-        """Setup auto detection tab"""
-        # Left: Camera preview
-        left_frame = ttk.LabelFrame(self.auto_tab, text="Live Detection", padding="10")
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        self.auto_canvas = tk.Canvas(left_frame, bg='black', width=640, height=480)
-        self.auto_canvas.pack(fill=tk.BOTH, expand=True)
-        
-        # Controls
-        ctrl_frame = ttk.Frame(left_frame)
-        ctrl_frame.pack(fill=tk.X, pady=10)
-        
-        self.auto_detect_var = tk.BooleanVar(value=False)
-        self.auto_check = ttk.Checkbutton(ctrl_frame, text="Enable Auto-Detection",
-                                         variable=self.auto_detect_var,
-                                         command=self.toggle_auto_detect)
-        self.auto_check.pack(side=tk.LEFT, padx=5)
-        
-        self.camera_btn = ttk.Button(ctrl_frame, text="Start Camera", command=self.toggle_camera)
-        self.camera_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.detect_btn = ttk.Button(ctrl_frame, text="Detect Now", command=self.detect_object_now)
-        self.detect_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Right: Detection results
-        right_frame = ttk.LabelFrame(self.auto_tab, text="Detection Results", padding="10")
-        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        self.result_text = scrolledtext.ScrolledText(right_frame, height=15, width=45)
-        self.result_text.pack(fill=tk.BOTH, expand=True)
-        
-        # Stats
-        stats_frame = ttk.LabelFrame(right_frame, text="Statistics", padding="5")
-        stats_frame.pack(fill=tk.X, pady=10)
-        
-        self.stats_label = ttk.Label(stats_frame, text="Objects detected: 0\nLast cell: N/A")
-        self.stats_label.pack()
-        
-        # Action
-        action_frame = ttk.LabelFrame(right_frame, text="Action on Detection", padding="5")
-        action_frame.pack(fill=tk.X, pady=10)
-        
-        self.execute_on_detect_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(action_frame, text="Execute sequence on detection",
-                       variable=self.execute_on_detect_var).pack(anchor='w')
-        
-        # Sensitivity (same as calib tab)
-        sens_frame = ttk.LabelFrame(right_frame, text="Sensitivity", padding="5")
-        sens_frame.pack(fill=tk.X, pady=10)
-        
-        ttk.Label(sens_frame, text="Threshold:").pack(anchor='w')
-        ttk.Scale(sens_frame, from_=10, to=100, variable=self.threshold_var,
-                 orient=tk.HORIZONTAL).pack(fill=tk.X)
-        ttk.Label(sens_frame, text="Min Area:").pack(anchor='w', pady=(5,0))
-        ttk.Scale(sens_frame, from_=1000, to=10000, variable=self.min_area_var,
-                 orient=tk.HORIZONTAL).pack(fill=tk.X)
     
     def setup_log_panel(self, parent):
         """Setup shared log panel"""
@@ -940,143 +879,47 @@ class UnifiedControlSystem:
         
         self.log(f"Testing sequence for {self.current_cell}")
         # Would execute sequence here
-    
-    # Auto Detection Methods
-    def start_auto_preview(self):
-        """Start auto detection preview"""
-        self.auto_cap = cv2.VideoCapture(2)
-        if self.auto_cap.isOpened():
-            self.auto_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            self.auto_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            self.update_auto_preview()
-    
-    def update_auto_preview(self):
-        """Update auto detection preview - scale to fit canvas and center"""
-        try:
-            if not hasattr(self, 'auto_cap') or not self.auto_cap or not self.auto_cap.isOpened():
-                self.auto_canvas.after(30, self.update_auto_preview)
-                return
 
-            ret, frame = self.auto_cap.read()
-            if not ret:
-                self.auto_canvas.after(30, self.update_auto_preview)
-                return
-
-            # Get canvas size
-            canvas_width = self.auto_canvas.winfo_width()
-            canvas_height = self.auto_canvas.winfo_height()
-
-            if canvas_width < 2 or canvas_height < 2:
-                self.auto_canvas.after(30, self.update_auto_preview)
-                return
-
-            # Get frame dimensions
-            frame_height, frame_width = frame.shape[:2]
-
-            # Calculate scale to fit canvas (maintain aspect ratio)
-            scale_x = canvas_width / frame_width
-            scale_y = canvas_height / frame_height
-            scale = min(scale_x, scale_y)
-
-            # Calculate new dimensions
-            new_width = int(frame_width * scale)
-            new_height = int(frame_height * scale)
-
-            # Resize frame
-            display_frame = cv2.resize(frame, (new_width, new_height))
-
-            # Create black background
-            bg = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
-
-            # Center the image
-            x_offset = (canvas_width - new_width) // 2
-            y_offset = (canvas_height - new_height) // 2
-            bg[y_offset:y_offset+new_height, x_offset:x_offset+new_width] = display_frame
-
-            # Store scale and offset for detection
-            self.auto_scale = scale
-            self.auto_x_offset = x_offset
-            self.auto_y_offset = y_offset
-
-            # If auto-detect enabled, draw detections - scaled
-            if self.auto_detect_enabled and self.empty_grid is not None:
-                objects = self.detect_objects(frame)
-                for obj in objects:
-                    # Scale detection coordinates to display coordinates
-                    disp_x = int(obj['x'] * scale) + x_offset
-                    disp_y = int(obj['y'] * scale) + y_offset
-                    disp_w = int(obj['w'] * scale)
-                    disp_h = int(obj['h'] * scale)
-
-                    cv2.rectangle(bg, (disp_x, disp_y), (disp_x+disp_w, disp_y+disp_h), (0, 255, 0), 2)
-                    cv2.putText(bg, f"Cell: {obj.get('cell', '?')}", (disp_x, disp_y-10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-            # Convert BGR to RGB
-            bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(bg)
-            photo = ImageTk.PhotoImage(image=img)
-
-            self.auto_canvas.delete("all")
-            self.auto_canvas.create_image(0, 0, anchor='nw', image=photo)
-            self.auto_canvas.image = photo
-
-            self.auto_canvas.after(30, self.update_auto_preview)
-        except Exception as e:
-            self.log(f"Auto preview error: {e}")
-            self.auto_canvas.after(1000, self.update_auto_preview)
-    
-    def toggle_camera(self):
-        """Toggle camera"""
-        if self.is_running:
-            self.is_running = False
-            self.camera_btn.config(text="Start Camera")
-            self.log("Camera stopped")
-        else:
-            self.is_running = True
-            self.camera_btn.config(text="Stop Camera")
-            self.log("Camera started")
-    
-    def toggle_auto_detect(self):
-        """Toggle auto detection"""
-        self.auto_detect_enabled = self.auto_detect_var.get()
-        self.log(f"Auto-detection {'enabled' if self.auto_detect_enabled else 'disabled'}")
-    
     def detect_objects(self, frame):
-        """Detect objects in frame"""
+        """Detect objects in frame and log positions"""
         if self.empty_grid is None:
             return []
-        
+
         # Background subtraction
         diff = cv2.absdiff(self.empty_grid, frame)
         diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
         _, thresh = cv2.threshold(diff_gray, self.threshold_var.get(), 255, cv2.THRESH_BINARY)
-        
+
         # Morphological operations
         kernel = np.ones((5, 5), np.uint8)
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
-        
+
         # Find contours
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
+
         objects = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
             if area > self.min_area_var.get():
                 x, y, w, h = cv2.boundingRect(cnt)
-                
+
                 # Find cell
                 cx, cy = x + w//2, y + h//2
                 cell = self.find_cell(cx, cy)
-                
+
                 objects.append({
                     'x': x, 'y': y, 'w': w, 'h': h,
                     'cx': cx, 'cy': cy,
                     'area': area,
                     'cell': cell
                 })
-        
+
+        # Log detected objects
+        if objects:
+            for obj in objects:
+                self.log(f"📍 Object detected at ({obj['cx']}, {obj['cy']}) in cell {obj['cell']}")
+
         return objects
     
     def find_cell(self, x, y):
@@ -1107,60 +950,6 @@ class UnifiedControlSystem:
                         return f"{chr(ord('A')+row)}{col+1}"
         
         return "?"
-    
-    def detect_object_now(self):
-        """Detect objects now"""
-        ret, frame = self.auto_cap.read()
-        if not ret:
-            return
-        
-        objects = self.detect_objects(frame)
-        
-        self.result_text.delete('1.0', tk.END)
-        self.result_text.insert(tk.END, f"Detection Results:\n")
-        self.result_text.insert(tk.END, f"="*40 + "\n")
-        
-        if not objects:
-            self.result_text.insert(tk.END, "No objects detected\n")
-        else:
-            for i, obj in enumerate(objects):
-                self.result_text.insert(tk.END, f"\nObject {i+1}:\n")
-                self.result_text.insert(tk.END, f"  Cell: {obj.get('cell', '?')}\n")
-                self.result_text.insert(tk.END, f"  Position: ({obj['cx']}, {obj['cy']})\n")
-                self.result_text.insert(tk.END, f"  Size: {obj['w']}x{obj['h']}\n")
-                self.result_text.insert(tk.END, f"  Area: {obj['area']:.0f}\n")
-                
-                # Update stats
-                self.detection_count += 1
-                self.last_cell = obj.get('cell', '?')
-                self.stats_label.config(text=f"Objects detected: {self.detection_count}\nLast cell: {self.last_cell}")
-                
-                # Execute sequence if enabled
-                if self.execute_on_detect_var.get() and obj.get('cell') in self.sequences:
-                    self.log(f"Object in {obj['cell']} - executing sequence!")
-                    self.execute_cell_sequence(obj['cell'])
-        
-        self.log(f"Detection complete: {len(objects)} objects")
-    
-    def execute_cell_sequence(self, cell):
-        """Execute sequence for cell"""
-        if cell not in self.sequences:
-            self.log(f"No sequence for {cell}")
-            return
-        
-        if not self.is_connected:
-            self.log("Not connected to Arduino!")
-            return
-        
-        self.log(f"Executing sequence for {cell}")
-        for step in self.sequences[cell]:
-            if 'angles' in step:
-                for i, angle in enumerate(step['angles']):
-                    command = f"{i} {angle}\n"
-                    self.serial_conn.write(command.encode())
-                time.sleep(step.get('delay', 1000) / 1000.0)
-        
-        self.log(f"Sequence for {cell} complete")
     
     def load_calibration(self):
         """Load existing calibration"""
