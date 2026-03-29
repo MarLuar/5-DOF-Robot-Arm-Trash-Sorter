@@ -470,11 +470,11 @@ class UnifiedControlSystem:
             pass
     
     def send_servo(self, idx):
-        """Send servo command"""
+        """Send single servo command (individual movement)"""
         if not self.is_connected:
             self.log("Not connected!")
             return
-        
+
         try:
             angle = int(self.input_boxes[idx].get())
             command = f"{idx} {angle}\n"
@@ -482,12 +482,24 @@ class UnifiedControlSystem:
             self.log(f"Sent: {JOINT_NAMES[idx]} -> {angle}°")
         except Exception as e:
             self.log(f"Error: {e}")
-    
+
+    def send_multi_move(self, angles):
+        """Send multi-move command for simultaneous movement: M a1 a2 a3 a4 a5"""
+        if not self.is_connected:
+            return
+
+        try:
+            command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
+            self.serial_conn.write(command.encode())
+            self.log(f"Sent multi-move: {angles} (simultaneous)")
+        except Exception as e:
+            self.log(f"Error: {e}")
+
     def set_speed(self):
         """Set movement speed"""
         if not self.is_connected:
             return
-        
+
         try:
             speed = int(self.speed_var.get())
             command = f"99 {speed}\n"
@@ -495,25 +507,25 @@ class UnifiedControlSystem:
             self.log(f"Speed set to {speed}ms/deg")
         except:
             pass
-    
+
     def go_to_rest(self):
-        """Go to rest position (uses legacy rest position)"""
+        """Go to rest position (simultaneous movement)"""
         rest_angles = LEGACY_PRESETS.get('Rest', DEFAULT_REST)
         for i, angle in enumerate(rest_angles):
             self.input_boxes[i].set(str(angle))
-            if self.is_connected:
-                self.send_servo(i)
-        self.log("Moved to rest position")
+        if self.is_connected:
+            self.send_multi_move(rest_angles)
+        self.log("Moved to rest position (simultaneous)")
 
     def go_to_pickup(self):
-        """Go to pickup position (uses legacy pickup position)"""
+        """Go to pickup position (simultaneous movement)"""
         pickup_angles = LEGACY_PRESETS.get('Pickup', DEFAULT_PICKUP)
         for i, angle in enumerate(pickup_angles):
             self.input_boxes[i].set(str(angle))
-            if self.is_connected:
-                self.send_servo(i)
-        self.log("Moved to pickup position")
-    
+        if self.is_connected:
+            self.send_multi_move(pickup_angles)
+        self.log("Moved to pickup position (simultaneous)")
+
     def refresh_seq_list(self):
         """Refresh sequence listbox"""
         self.seq_listbox.delete(0, tk.END)
@@ -521,23 +533,22 @@ class UnifiedControlSystem:
             self.seq_listbox.insert(tk.END, name)
     
     def play_sequence(self):
-        """Play selected sequence"""
+        """Play selected sequence with simultaneous movement"""
         selection = self.seq_listbox.curselection()
         if not selection:
             return
-        
+
         seq_name = self.seq_listbox.get(selection[0])
         if seq_name not in self.sequences:
             return
-        
+
         self.log(f"Playing sequence: {seq_name}")
         for step in self.sequences[seq_name]:
             if self.is_connected and 'angles' in step:
-                for i, angle in enumerate(step['angles']):
-                    command = f"{i} {angle}\n"
-                    self.serial_conn.write(command.encode())
+                # Use multi-move for simultaneous movement
+                self.send_multi_move(step['angles'])
                 time.sleep(step.get('delay', 1000) / 1000.0)
-        
+
         self.log("Sequence complete")
     
     def stop_sequence(self):
