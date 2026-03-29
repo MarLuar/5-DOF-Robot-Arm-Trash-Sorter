@@ -139,6 +139,7 @@ class UnifiedControlSystem:
         # Performance optimizations
         self.serial_lock = threading.Lock()  # Thread-safe serial access
         self.frame_count = 0  # For frame skipping
+        self.camera_running = False  # Camera thread control
 
         # Setup UI
         self.setup_ui()
@@ -151,6 +152,9 @@ class UnifiedControlSystem:
 
         # Load sequences (after UI is ready)
         self.load_sequences()
+
+        # Start camera thread
+        self.start_camera_thread()
 
         # Auto-go to rest position after short delay (when connected)
         self.root.after(2000, self.auto_go_to_rest_on_startup)
@@ -887,12 +891,15 @@ class UnifiedControlSystem:
         messagebox.showinfo("Pasted!", f"Angles pasted to Manual Control:\n{angles}\n\nClick 'Send' on any servo to move to this position")
 
     def send_to_arduino(self, command):
-        """Send command to Arduino directly with lock (thread-safe)"""
+        """Send command to Arduino directly (non-blocking)"""
         if self.is_connected and self.serial_conn and self.serial_conn.is_open:
-            with self.serial_lock:
-                self.serial_conn.write(command.encode())
-                self.serial_conn.flush()
-                time.sleep(0.02)  # Small delay for Arduino to process
+            try:
+                with self.serial_lock:
+                    self.serial_conn.write(command.encode())
+                    self.serial_conn.flush()
+                # Don't sleep inside lock - allows other commands to queue
+            except Exception as e:
+                self.log(f"Serial error: {e}")
 
     def refresh_seq_list(self):
         """Refresh sequence listbox"""
@@ -1157,7 +1164,7 @@ class UnifiedControlSystem:
             self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
             self.calib_canvas.image = photo
 
-            self.calib_canvas.after(200, self.update_calib_preview)  # 5 FPS for better performance
+            self.calib_canvas.after(500, self.update_calib_preview)  # 2 FPS for maximum performance
         except Exception as e:
             self.log(f"Preview error: {e}")
             self.calib_canvas.after(1000, self.update_calib_preview)
@@ -1376,7 +1383,9 @@ class UnifiedControlSystem:
                     self.send_to_arduino(command)
 
                     self.root.after(0, lambda s=i+1, c=cell: self.log(f"  Step {s}/{len(self.sequences[c])}: {angles}"))
-                    time.sleep(delay / 1000.0)
+
+                    # Wait for servo movement (minimum 1 second)
+                    time.sleep(max(1.0, delay / 1000.0))
 
             self.root.after(0, lambda c=cell: self.log(f"✓ Pickup sequence for {c} complete!"))
             self.root.after(0, lambda: self.log("🤖 Object picked up successfully!"))
