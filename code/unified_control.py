@@ -30,6 +30,10 @@ MAX_ANGLE = 180
 DEFAULT_REST = [150, 0, 70, 70, 140]
 DEFAULT_PICKUP = [80, 100, 20, 0, 0]
 
+# Legacy file paths from old system
+LEGACY_SEQUENCES_FILE = os.path.expanduser("~/.robotic_arm_sequences.json")
+LEGACY_PRESETS_FILE = os.path.expanduser("~/.robotic_arm_presets.json")
+
 JOINT_NAMES = ["Base", "Shoulder", "Elbow", "Wrist", "Gripper"]
 CELL_NAMES = [f"{chr(ord('A')+row)}{col+1}" for row in range(4) for col in range(4)]
 
@@ -77,10 +81,11 @@ class UnifiedControlSystem:
         self.setup_ui()
         self.refresh_ports()
         self.load_calibration()
-        
-        # Start camera preview in auto tab
-        self.start_auto_preview()
-        
+        self.load_sequences()  # Load sequences after UI is setup
+
+        # Start camera preview in auto tab (single camera instance)
+        self.start_camera()
+
         # Start logging
         self.log("System initialized - v1.00.02")
     
@@ -521,32 +526,82 @@ class UnifiedControlSystem:
         """Stop sequence (placeholder)"""
         self.log("Sequence stopped")
     
-    # Calibration Methods
-    def start_calib_preview(self):
-        """Start calibration preview"""
+    # Camera Methods (single instance shared between tabs)
+    def start_camera(self):
+        """Start single camera instance"""
         self.cap = cv2.VideoCapture(2)
         if self.cap.isOpened():
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.is_running = True
+            self.log("Camera started")
+            # Start both previews
             self.update_calib_preview()
-    
+            self.update_auto_preview()
+        else:
+            self.log("Warning: Could not open camera on /dev/video2")
+            # Try video0 as fallback
+            self.cap = cv2.VideoCapture(0)
+            if self.cap.isOpened():
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                self.is_running = True
+                self.log("Camera started on /dev/video0 (fallback)")
+                self.update_calib_preview()
+                self.update_auto_preview()
+            else:
+                self.log("ERROR: No camera available!")
+                messagebox.showerror("Camera Error", "Could not open any camera!\n\nMake sure:\n1. Camera is plugged in\n2. Not used by another program\n3. Try: ls -la /dev/video*")
+
     def update_calib_preview(self):
-        """Update calibration preview"""
+        """Update calibration tab preview"""
+        if not hasattr(self, 'cap') or self.cap is None:
+            return
+
         ret, frame = self.cap.read()
         if ret:
             # Draw corners
             for i, (x, y) in enumerate(self.corners):
                 color = [(0,0,255), (255,0,0), (0,255,0), (0,255,255)][i]
                 cv2.circle(frame, (x, y), 10, color, -1)
-            
+
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame)
             photo = ImageTk.PhotoImage(image=img)
-            
+
             self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
             self.calib_canvas.image = photo
-        
-        self.calib_canvas.after(30, self.update_calib_preview)
+
+        if hasattr(self, 'calib_canvas'):
+            self.calib_canvas.after(30, self.update_calib_preview)
+
+    def update_auto_preview(self):
+        """Update auto detection tab preview"""
+        if not hasattr(self, 'cap') or self.cap is None:
+            return
+
+        ret, frame = self.cap.read()
+        if ret:
+            if self.auto_detect_enabled and self.empty_grid is not None:
+                # Detect objects
+                objects = self.detect_objects(frame)
+
+                # Draw detections
+                for obj in objects:
+                    x, y, w, h = obj['x'], obj['y'], obj['w'], obj['h']
+                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                    cv2.putText(frame, f"Cell: {obj.get('cell', '?')}", (x, y-10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(frame)
+            photo = ImageTk.PhotoImage(image=img)
+
+            self.auto_canvas.create_image(0, 0, anchor='nw', image=photo)
+            self.auto_canvas.image = photo
+
+        if hasattr(self, 'auto_canvas'):
+            self.auto_canvas.after(30, self.update_auto_preview)
     
     def on_calib_click(self, event):
         """Handle calibration click"""
@@ -620,14 +675,65 @@ class UnifiedControlSystem:
     
     # Sequence Methods
     def load_sequences(self):
-        """Load sequences from file"""
+        """Load sequences from file including legacy sequences"""
+        # First try new location
         if os.path.exists(SEQUENCES_FILE):
             try:
                 with open(SEQUENCES_FILE, 'r') as f:
                     self.sequences = json.load(f)
-                self.log(f"Loaded {len(self.sequences)} sequences")
+                self.log(f"Loaded {len(self.sequences)} sequences from new location")
+                return
             except:
+                pass
+
+        # Try legacy location
+        if os.path.exists(LEGACY_SEQUENCES_FILE):
+            try:
+                with open(LEGACY_SEQUENCES_FILE, 'r') as f:
+                    legacy_seqs = json.load(f)
+
+                # Convert legacy format to new format
                 self.sequences = {}
+                for name, steps in legacy_seqs.items():
+                    self.sequences[name] = []
+                    for step in steps:
+                        if isinstance(step[0], str):
+                            # It's a preset name, need to convert to angles
+                            preset_name = step[0]
+                            delay = step[1] if len(step) > 1 else 1000
+                            # Load preset angles
+                            angles = self.get_preset_angles(preset_name)
+                            if angles:
+                                self.sequences[name].append({'angles': angles, 'delay': delay, 'name': preset_name})
+                        else:
+                            # It's already angles
+                            self.sequences[name].append({'angles': step[0], 'delay': step[1] if len(step) > 1 else 1000})
+
+                self.log(f"Loaded {len(self.sequences)} sequences from legacy file")
+                return
+            except Exception as e:
+                self.log(f"Could not load legacy sequences: {e}")
+
+        self.sequences = {}
+        self.log("No sequences found")
+
+    def get_preset_angles(self, preset_name):
+        """Get angles for a preset name from legacy presets"""
+        if os.path.exists(LEGACY_PRESETS_FILE):
+            try:
+                with open(LEGACY_PRESETS_FILE, 'r') as f:
+                    presets = json.load(f)
+                if preset_name in presets:
+                    return presets[preset_name]
+            except:
+                pass
+
+        # Default presets
+        defaults = {
+            'Rest': DEFAULT_REST,
+            'Pickup': DEFAULT_PICKUP
+        }
+        return defaults.get(preset_name)
     
     def on_cell_select(self, event):
         """Handle cell selection"""
@@ -724,40 +830,8 @@ class UnifiedControlSystem:
         # Would execute sequence here
     
     # Auto Detection Methods
-    def start_auto_preview(self):
-        """Start auto detection preview"""
-        self.auto_cap = cv2.VideoCapture(2)
-        if self.auto_cap.isOpened():
-            self.auto_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            self.auto_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            self.update_auto_preview()
-    
-    def update_auto_preview(self):
-        """Update auto detection preview"""
-        ret, frame = self.auto_cap.read()
-        if ret:
-            if self.auto_detect_enabled and self.empty_grid is not None:
-                # Detect objects
-                objects = self.detect_objects(frame)
-                
-                # Draw detections
-                for obj in objects:
-                    x, y, w, h = obj['x'], obj['y'], obj['w'], obj['h']
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                    cv2.putText(frame, f"Cell: {obj.get('cell', '?')}", (x, y-10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(frame)
-            photo = ImageTk.PhotoImage(image=img)
-            
-            self.auto_canvas.create_image(0, 0, anchor='nw', image=photo)
-            self.auto_canvas.image = photo
-        
-        self.auto_canvas.after(30, self.update_auto_preview)
-    
     def toggle_camera(self):
-        """Toggle camera"""
+        """Toggle camera on/off"""
         if self.is_running:
             self.is_running = False
             self.camera_btn.config(text="Start Camera")
