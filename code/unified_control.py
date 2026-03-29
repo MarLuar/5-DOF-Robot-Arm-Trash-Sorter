@@ -230,10 +230,13 @@ class UnifiedControlSystem:
         
         self.connect_btn = ttk.Button(port_frame, text="Connect", command=self.toggle_connection)
         self.connect_btn.pack(side=tk.LEFT, padx=5)
-        
+
         self.refresh_btn = ttk.Button(port_frame, text="Refresh", command=self.refresh_ports)
         self.refresh_btn.pack(side=tk.LEFT, padx=5)
-        
+
+        self.recover_btn = ttk.Button(port_frame, text="🔄 Recover", command=self.recover_connection)
+        self.recover_btn.pack(side=tk.LEFT, padx=5)
+
         self.status_label = ttk.Label(conn_frame, text="Status: Disconnected", foreground='red')
         self.status_label.pack(pady=5)
         
@@ -467,6 +470,10 @@ class UnifiedControlSystem:
             self.serial_conn = serial.Serial(port, BAUD_RATE, timeout=1)
             time.sleep(2)  # Wait for Arduino reset
 
+            # Clear any pending data
+            self.serial_conn.reset_input_buffer()
+            self.serial_conn.reset_output_buffer()
+
             # Update UI from main thread
             self.root.after(0, self._on_connected, port)
         except Exception as e:
@@ -483,10 +490,28 @@ class UnifiedControlSystem:
         self.log("Moving to rest position (prevents struggling)...")
         self.go_to_rest()
 
-    def _on_connect_error(self, error):
-        """Called when connection fails"""
-        messagebox.showerror("Error", f"Could not connect: {error}")
-        self.log(f"Connection failed: {error}")
+        # Start monitoring for communication errors
+        self.root.after(5000, self._monitor_communication)
+
+    def _monitor_communication(self):
+        """Monitor serial communication for errors and auto-recover"""
+        if self.is_connected and self.serial_conn:
+            try:
+                # Check if port is still open
+                if not self.serial_conn.is_open:
+                    self.log("⚠ Serial port closed! Attempting recovery...")
+                    self.disconnect()
+                    self.root.after(1000, self.connect)
+                    return
+
+                # Check for pending errors (you can add more checks here)
+                # For now, just schedule next check
+                self.root.after(5000, self._monitor_communication)
+            except Exception as e:
+                self.log(f"⚠ Communication error detected: {e}")
+                self.log("Attempting to reconnect...")
+                self.disconnect()
+                self.root.after(1000, self.connect)
 
     def disconnect(self):
         """Disconnect from Arduino"""
@@ -502,6 +527,14 @@ class UnifiedControlSystem:
 
         # Start monitoring for reconnection
         self.root.after(1000, self._monitor_reconnection)
+
+    def recover_connection(self):
+        """Manual recovery - disconnect and reconnect"""
+        self.log("🔄 Recovery initiated...")
+        if self.is_connected:
+            self.disconnect()
+        self.root.after(1000, self.connect)
+        self.log("Attempting reconnection...")
 
     def _monitor_reconnection(self):
         """Monitor for Arduino reconnection and auto-go to rest"""
@@ -568,7 +601,14 @@ class UnifiedControlSystem:
                 self.root.after(0, lambda a=angle: self.log(f"⚠ WARNING: Base {a}° is in danger zone (110-120°) - May malfunction!"))
 
             command = f"{idx} {angle}\n"
-            self.serial_conn.write(command.encode())
+
+            # Clear serial buffers before sending (prevents buffer overflow)
+            if self.serial_conn and self.serial_conn.is_open:
+                self.serial_conn.reset_input_buffer()
+                self.serial_conn.reset_output_buffer()
+                self.serial_conn.write(command.encode())
+                self.serial_conn.flush()  # Ensure command is sent
+
             # Update UI from main thread
             self.root.after(0, lambda idx=idx, angle=angle: self.log(f"Sent: {JOINT_NAMES[idx]} -> {angle}°"))
         except ValueError:
@@ -596,7 +636,14 @@ class UnifiedControlSystem:
         """Background thread for sending multi-move command"""
         try:
             command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
-            self.serial_conn.write(command.encode())
+
+            # Clear serial buffers before sending (prevents buffer overflow)
+            if self.serial_conn and self.serial_conn.is_open:
+                self.serial_conn.reset_input_buffer()
+                self.serial_conn.reset_output_buffer()
+                self.serial_conn.write(command.encode())
+                self.serial_conn.flush()  # Ensure command is sent
+
             # Update UI from main thread
             self.root.after(0, lambda a=angles: self.log(f"Sent multi-move: {a} (simultaneous)"))
         except Exception as ex:
