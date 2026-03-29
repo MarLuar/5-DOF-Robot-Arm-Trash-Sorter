@@ -696,12 +696,30 @@ class UnifiedControlSystem:
     
     # Calibration Methods
     def start_calib_preview(self):
-        """Start calibration preview"""
-        self.cap = cv2.VideoCapture(2)
+        """Start calibration preview - Z-Star USB camera (video3 or video4)"""
+        self.log("Starting Z-Star camera (video3)...")
+
+        # Close any existing camera
+        if hasattr(self, 'cap') and self.cap:
+            self.cap.release()
+
+        # Try to open Z-Star camera (video3 - may change on replug)
+        self.cap = cv2.VideoCapture(3)
+
+        # If video3 fails, try video4 (Z-Star may move on replug)
+        if not self.cap.isOpened():
+            self.log("video3 not available, trying video4...")
+            self.cap.release()
+            self.cap = cv2.VideoCapture(4)
+
         if self.cap.isOpened():
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.log("✓ Z-Star camera opened")
             self.update_calib_preview()
+        else:
+            self.log("✗ ERROR: Z-Star camera not found on video3 or video4!")
+            messagebox.showerror("Camera Error", "Could not open Z-Star camera!\n\nTried: /dev/video3, /dev/video4\n\nMake sure:\n1. Camera is plugged in\n2. Try a different USB port")
     
     def update_calib_preview(self):
         """Update calibration preview - scale to fit canvas and center"""
