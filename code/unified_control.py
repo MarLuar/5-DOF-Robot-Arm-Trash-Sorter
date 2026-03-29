@@ -27,6 +27,48 @@ BAUD_RATE = 115200
 DEFAULT_SPEED = 15
 MIN_ANGLE = 0
 MAX_ANGLE = 180
+
+# Legacy preset positions from original robotic_arm_controller.py
+LEGACY_PRESETS = {
+    'Rest': [80, 180, 50, 80, 140],
+    'Pickup': [80, 74, 50, 5, 140],
+    'LEFT DROP': [170, 100, 70, 30, 140],
+    'DOWN': [80, 60, 30, 30, 0],
+    'GRAB': [80, 74, 50, 5, 0],
+    'left': [170, 84, 60, 35, 0],
+    'ENGAGE': [80, 84, 60, 35, 0],
+    'RIGHT': [0, 84, 60, 35, 0],
+    'RIGHT DROP': [0, 84, 60, 15, 140],
+    'UP': [80, 124, 10, 25, 0],
+}
+
+# Legacy sequences from original robotic_arm_controller.py
+LEGACY_SEQUENCES = {
+    'Basic Pick & Place': [
+        ['Pickup', 1500],
+        ['Rest', 1000]
+    ],
+    'LEFT': [
+        ['Rest', 1000],
+        ['Pickup', 1000],
+        ['GRAB', 1000],
+        ['ENGAGE', 1000],
+        ['left', 1000],
+        ['LEFT DROP', 1000],
+        ['left', 1000],
+        ['Rest', 1000]
+    ],
+    'RIGHT': [
+        ['Rest', 1000],
+        ['Pickup', 1000],
+        ['GRAB', 1000],
+        ['ENGAGE', 1000],
+        ['RIGHT', 1000],
+        ['RIGHT DROP', 1000],
+        ['RIGHT', 1000],
+        ['Rest', 1000]
+    ]
+}
 DEFAULT_REST = [150, 0, 70, 70, 140]
 DEFAULT_PICKUP = [80, 100, 20, 0, 0]
 
@@ -309,16 +351,23 @@ class UnifiedControlSystem:
         ttk.Button(step_btn_frame, text="Clear", command=self.clear_steps).pack(side=tk.LEFT, padx=2)
         
         ttk.Button(mid_frame, text="Save Sequence to Cell", command=self.save_current_sequence).pack(pady=5)
-        
+
+        # Legacy sequences info
+        legacy_frame = ttk.LabelFrame(mid_frame, text="Legacy Sequences (Loaded)", padding="5")
+        legacy_frame.pack(fill=tk.X, pady=(10, 0))
+
+        ttk.Label(legacy_frame, text="• Basic Pick & Place\n• LEFT Sequence\n• RIGHT Sequence",
+                 font=('Helvetica', 9, 'bold'), foreground='blue').pack(anchor='w')
+
         # Right: Presets
         right_frame = ttk.LabelFrame(self.seq_tab, text="Quick Presets", padding="10")
         right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
-        
+
         ttk.Button(right_frame, text="Load Rest Position", command=self.load_rest_preset).pack(fill=tk.X, pady=2)
         ttk.Button(right_frame, text="Load Pickup Position", command=self.load_pickup_preset).pack(fill=tk.X, pady=2)
-        
+
         ttk.Separator(right_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-        
+
         ttk.Label(right_frame, text="Test:").pack(anchor='w')
         ttk.Button(right_frame, text="Play Sequence", command=self.test_sequence).pack(fill=tk.X, pady=2)
     
@@ -774,14 +823,40 @@ class UnifiedControlSystem:
     
     # Sequence Methods
     def load_sequences(self):
-        """Load sequences from file"""
+        """Load sequences including legacy sequences"""
+        # First load legacy sequences
+        self.log("Loading legacy sequences...")
+        for seq_name, steps in LEGACY_SEQUENCES.items():
+            # Convert preset names to angles
+            converted_steps = []
+            for step in steps:
+                if isinstance(step[0], str):
+                    preset_name = step[0]
+                    delay = step[1] if len(step) > 1 else 1000
+                    # Get angles from legacy presets
+                    if preset_name in LEGACY_PRESETS:
+                        angles = LEGACY_PRESETS[preset_name]
+                        converted_steps.append({
+                            'angles': angles,
+                            'delay': delay,
+                            'name': preset_name
+                        })
+                        self.log(f"  {seq_name}: {preset_name} -> {angles}")
+            self.sequences[seq_name] = converted_steps
+
+        self.log(f"✓ Loaded {len(self.sequences)} legacy sequences")
+
+        # Also try to load from file
         if os.path.exists(SEQUENCES_FILE):
             try:
                 with open(SEQUENCES_FILE, 'r') as f:
-                    self.sequences = json.load(f)
-                self.log(f"Loaded {len(self.sequences)} sequences")
-            except:
-                self.sequences = {}
+                    file_sequences = json.load(f)
+                for seq_name, steps in file_sequences.items():
+                    if seq_name not in self.sequences:
+                        self.sequences[seq_name] = steps
+                        self.log(f"✓ Loaded additional sequence: {seq_name}")
+            except Exception as e:
+                self.log(f"Could not load sequences from file: {e}")
     
     def on_cell_select(self, event):
         """Handle cell selection"""
@@ -859,14 +934,24 @@ class UnifiedControlSystem:
         messagebox.showinfo("Success", f"Sequence saved to {self.current_cell}!\n\n{len(steps)} steps")
     
     def load_rest_preset(self):
-        """Load rest preset"""
-        for i, angle in enumerate(DEFAULT_REST):
-            self.input_boxes[i].set(str(angle))
-    
+        """Load rest position from legacy presets"""
+        if 'Rest' in LEGACY_PRESETS:
+            for i, angle in enumerate(LEGACY_PRESETS['Rest']):
+                self.input_boxes[i].set(str(angle))
+            self.log("Loaded legacy Rest position")
+        else:
+            for i, angle in enumerate(DEFAULT_REST):
+                self.input_boxes[i].set(str(angle))
+
     def load_pickup_preset(self):
-        """Load pickup preset"""
-        for i, angle in enumerate(DEFAULT_PICKUP):
-            self.input_boxes[i].set(str(angle))
+        """Load pickup position from legacy presets"""
+        if 'Pickup' in LEGACY_PRESETS:
+            for i, angle in enumerate(LEGACY_PRESETS['Pickup']):
+                self.input_boxes[i].set(str(angle))
+            self.log("Loaded legacy Pickup position")
+        else:
+            for i, angle in enumerate(DEFAULT_PICKUP):
+                self.input_boxes[i].set(str(angle))
     
     def test_sequence(self):
         """Test current sequence"""
