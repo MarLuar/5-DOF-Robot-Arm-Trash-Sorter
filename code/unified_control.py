@@ -402,9 +402,16 @@ class UnifiedControlSystem:
     def refresh_ports(self):
         """Refresh serial ports"""
         ports = serial.tools.list_ports.comports()
-        port_list = [f"{p.device}" for p in ports]
+        port_list = [f"{p.device} - {p.description}" for p in ports]
         self.port_combo['values'] = port_list
         if port_list:
+            # Auto-select Arduino
+            for i, p in enumerate(ports):
+                if ('Arduino' in p.description or 'CH340' in p.description or
+                    'ttyACM' in p.device or 'ttyUSB' in p.device):
+                    self.port_combo.current(i)
+                    self.log(f"Found: {p.device}")
+                    return
             self.port_combo.current(0)
     
     def toggle_connection(self):
@@ -420,14 +427,23 @@ class UnifiedControlSystem:
         if not port:
             messagebox.showwarning("No Port", "Please select a port")
             return
-        
+
+        # Extract device path if format is "device - description"
+        if ' - ' in port:
+            port = port.split(' - ')[0]
+
         try:
             self.serial_conn = serial.Serial(port, BAUD_RATE, timeout=1)
             time.sleep(2)  # Wait for Arduino reset
             self.is_connected = True
             self.connect_btn.config(text="Disconnect")
             self.status_label.config(text="Status: Connected", foreground='green')
-            self.log(f"Connected to {port}")
+            self.log(f"✓ Connected to {port}")
+
+            # Go to rest position automatically
+            self.log("Moving to rest position...")
+            self.go_to_rest()
+
         except Exception as e:
             messagebox.showerror("Error", f"Could not connect: {e}")
             self.log(f"Connection failed: {e}")
@@ -481,16 +497,18 @@ class UnifiedControlSystem:
             pass
     
     def go_to_rest(self):
-        """Go to rest position"""
-        for i, angle in enumerate(DEFAULT_REST):
+        """Go to rest position (uses legacy rest position)"""
+        rest_angles = LEGACY_PRESETS.get('Rest', DEFAULT_REST)
+        for i, angle in enumerate(rest_angles):
             self.input_boxes[i].set(str(angle))
             if self.is_connected:
                 self.send_servo(i)
         self.log("Moved to rest position")
-    
+
     def go_to_pickup(self):
-        """Go to pickup position"""
-        for i, angle in enumerate(DEFAULT_PICKUP):
+        """Go to pickup position (uses legacy pickup position)"""
+        pickup_angles = LEGACY_PRESETS.get('Pickup', DEFAULT_PICKUP)
+        for i, angle in enumerate(pickup_angles):
             self.input_boxes[i].set(str(angle))
             if self.is_connected:
                 self.send_servo(i)
