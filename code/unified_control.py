@@ -1316,22 +1316,23 @@ class UnifiedControlSystem:
                         disp_y = int(self.all_points[i][1] * scale) + y_offset
                         cv2.circle(bg, (disp_x, disp_y), 10, corner_colors[i], -1)
 
-            # Object detection - draw detected objects (if enabled and empty grid is available)
-            # Only detect every 5th frame (2 FPS instead of 10 FPS) to reduce CPU
+            # Object detection - run every 10th frame (1 FPS) to prevent flickering at 10 FPS camera
             self.frame_count += 1
             if self.detect_in_calib_var.get() and hasattr(self, 'empty_grid') and self.empty_grid is not None:
-                if self.frame_count % 5 == 0:  # Detect every 5th frame
+                if self.frame_count % 10 == 0:  # Detect every 10th frame (at 10 FPS = 1 FPS detection)
                     objects = self.detect_objects(frame)
                     if objects:
                         self.last_detection_time = time.time()
                         self.last_detected_cell = max(objects, key=lambda o: o['area'])
                         self.last_detected_cell['cell'] = self.find_cell(self.last_detected_cell['cx'], self.last_detected_cell['cy'])
+                        self.log(f"📍 Object detected in {self.last_detected_cell['cell']}")
+
+                # Use persisted detection for 3 seconds (prevents flickering)
+                if time.time() - self.last_detection_time < self.detection_timeout and self.last_detected_cell:
+                    objects = [self.last_detected_cell]
                 else:
-                    # Use last detection if within timeout (prevents flickering)
-                    if time.time() - self.last_detection_time < self.detection_timeout and self.last_detected_cell:
-                        objects = [self.last_detected_cell]
-                    else:
-                        objects = []
+                    objects = []
+                    if self.frame_count % 10 == 0:  # Only clear on detection frame
                         self.last_detected_cell = None
 
                 # Track detected objects and enable pickup button
@@ -1382,6 +1383,7 @@ class UnifiedControlSystem:
                     # Update static display
                     self.update_detection_display(None)
 
+                # Draw detection boxes on camera feed
                 for obj in objects:
                     # Scale detection coordinates to display coordinates
                     disp_x = int(obj['x'] * scale) + x_offset
