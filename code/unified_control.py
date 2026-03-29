@@ -1185,12 +1185,27 @@ class UnifiedControlSystem:
             self.root.after(0, lambda c=cell: self.log(f"✓ Pickup sequence for {c} complete!"))
             self.root.after(0, lambda: self.log("🤖 Object picked up successfully!"))
 
-            # Clear detection after successful pickup
-            self.root.after(2000, self._clear_detection_after_pickup)
+            # Recapture empty grid after successful pickup
+            self.root.after(1000, self._recapture_empty_grid_after_pickup)
 
         except Exception as e:
             self.root.after(0, lambda: self.log(f"✗ Pickup error: {e}"))
             self.root.after(0, lambda: self.pickup_btn.config(state='normal'))
+
+    def _recapture_empty_grid_after_pickup(self):
+        """Recapture empty grid reference after pickup"""
+        self.log("📸 Recapturing empty grid reference...")
+
+        ret, frame = self.cap.read()
+        if ret:
+            self.empty_grid = frame.copy()
+            cv2.imwrite(BG_FILE, self.empty_grid)
+            self.log("✓ Empty grid reference updated")
+        else:
+            self.log("⚠ Could not recapture empty grid")
+
+        # Clear detection state
+        self._clear_detection_after_pickup()
 
     def _clear_detection_after_pickup(self):
         """Clear detection state after successful pickup"""
