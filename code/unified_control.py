@@ -141,6 +141,10 @@ class UnifiedControlSystem:
         self.frame_count = 0  # For frame skipping
         self.camera_running = False  # Camera thread control
 
+        # Debug: Track thread activity
+        self.main_thread_id = threading.current_thread().ident
+        self.last_command_time = 0
+
         # Setup UI
         self.setup_ui()
         self.refresh_ports()
@@ -149,6 +153,7 @@ class UnifiedControlSystem:
 
         # Start logging
         self.log("System initialized - v1.00.02")
+        self.log(f"🧵 Main thread: {threading.current_thread().name}")
 
         # Load sequences (after UI is ready)
         self.load_sequences()
@@ -862,6 +867,7 @@ class UnifiedControlSystem:
                     return
 
             # Send as multi-move for simultaneous movement
+            self.log(f"⏱️ Sending all servos at {time.time():.3f}")
             self.send_multi_move(angles)
             self.log(f"📤 Sent all servos simultaneously: {angles}")
         except ValueError:
@@ -891,12 +897,17 @@ class UnifiedControlSystem:
         messagebox.showinfo("Pasted!", f"Angles pasted to Manual Control:\n{angles}\n\nClick 'Send' on any servo to move to this position")
 
     def send_to_arduino(self, command):
-        """Send command to Arduino directly (non-blocking)"""
+        """Send command to Arduino directly (non-blocking) with debug timing"""
         if self.is_connected and self.serial_conn and self.serial_conn.is_open:
             try:
+                start_time = time.time()
                 with self.serial_lock:
                     self.serial_conn.write(command.encode())
                     self.serial_conn.flush()
+                elapsed = time.time() - start_time
+                # Log slow sends
+                if elapsed > 0.1:
+                    self.log(f"⏱️ Serial send took {elapsed:.3f}s: {command.strip()}")
                 # Don't sleep inside lock - allows other commands to queue
             except Exception as e:
                 self.log(f"Serial error: {e}")
@@ -905,10 +916,15 @@ class UnifiedControlSystem:
         """Start camera preview in separate thread"""
         def camera_loop():
             self.camera_running = True
+            self.log(f"📷 Camera thread started at {time.time():.3f}")
             while self.camera_running:
                 try:
+                    loop_start = time.time()
                     self.update_calib_preview_once()
-                    time.sleep(1.0)  # 1 FPS
+                    loop_elapsed = time.time() - loop_start
+                    if loop_elapsed > 0.5:
+                        self.log(f"📷 Camera frame took {loop_elapsed:.3f}s")
+                    time.sleep(max(0, 1.0 - loop_elapsed))  # Maintain 1 FPS
                 except Exception as e:
                     self.log(f"Camera error: {e}")
                     time.sleep(2)
@@ -1493,12 +1509,15 @@ class UnifiedControlSystem:
         thread.start()
 
     def _execute_pickup_sequence(self, cell):
-        """Execute pickup sequence in background thread"""
+        """Execute pickup sequence in background thread with debug timing"""
         try:
+            self.log(f"⏱️ Starting sequence for {cell} at {time.time():.3f}")
+
             for i, step in enumerate(self.sequences[cell]):
                 if 'angles' in step:
                     angles = step['angles']
                     delay = step.get('delay', 1000)
+                    step_start = time.time()
 
                     # Send multi-move command directly
                     command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
@@ -1509,7 +1528,11 @@ class UnifiedControlSystem:
                     # Wait for servo movement (minimum 1 second)
                     time.sleep(max(1.0, delay / 1000.0))
 
-            self.root.after(0, lambda c=cell: self.log(f"✓ Pickup sequence for {c} complete!"))
+                    step_elapsed = time.time() - step_start
+                    self.log(f"⏱️ Step {i+1} took {step_elapsed:.3f}s")
+
+            total_elapsed = time.time() - step_start
+            self.root.after(0, lambda c=cell: self.log(f"✓ Pickup sequence for {c} complete! (Total: {total_elapsed:.3f}s)"))
             self.root.after(0, lambda: self.log("🤖 Object picked up successfully!"))
 
             # Recapture empty grid after successful pickup
