@@ -240,22 +240,22 @@ class UnifiedControlSystem:
         ttk.Button(preset_frame, text="Rest Position", command=self.go_to_rest).pack(side=tk.LEFT, padx=5)
         ttk.Button(preset_frame, text="Pickup Position", command=self.go_to_pickup).pack(side=tk.LEFT, padx=5)
         
-        # Right: Connection & Speed
-        right_frame = ttk.LabelFrame(self.manual_tab, text="Connection & Speed", padding="10")
+        # Right: Connection, Presets & Speed
+        right_frame = ttk.Frame(self.manual_tab)
         right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
-        
+
         # Connection
         conn_frame = ttk.LabelFrame(right_frame, text="Serial Connection", padding="5")
         conn_frame.pack(fill=tk.X, pady=5)
-        
+
         port_frame = ttk.Frame(conn_frame)
         port_frame.pack(fill=tk.X)
-        
+
         ttk.Label(port_frame, text="Port:").pack(side=tk.LEFT)
         self.port_var = tk.StringVar()
         self.port_combo = ttk.Combobox(port_frame, textvariable=self.port_var, width=20)
         self.port_combo.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        
+
         self.connect_btn = ttk.Button(port_frame, text="Connect", command=self.toggle_connection)
         self.connect_btn.pack(side=tk.LEFT, padx=5)
 
@@ -267,24 +267,38 @@ class UnifiedControlSystem:
 
         self.status_label = ttk.Label(conn_frame, text="Status: Disconnected", foreground='red')
         self.status_label.pack(pady=5)
-        
+
+        # Presets
+        preset_frame = ttk.LabelFrame(right_frame, text="Quick Presets", padding="5")
+        preset_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Button(preset_frame, text="Load Rest", command=self.go_to_rest).pack(fill=tk.X, pady=2)
+        ttk.Button(preset_frame, text="Load Pickup", command=self.go_to_pickup).pack(fill=tk.X, pady=2)
+
+        ttk.Separator(preset_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+
+        # Copy current angles
+        ttk.Label(preset_frame, text="Current Angles:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
+        ttk.Button(preset_frame, text="📋 Copy Current Angles", command=self.copy_current_angles).pack(fill=tk.X, pady=2)
+        ttk.Button(preset_frame, text="📌 Paste to Sequences", command=self.paste_to_sequences).pack(fill=tk.X, pady=2)
+
         # Speed
         speed_frame = ttk.LabelFrame(right_frame, text="Movement Speed", padding="5")
         speed_frame.pack(fill=tk.X, pady=5)
-        
+
         self.speed_var = tk.StringVar(value=str(DEFAULT_SPEED))
         ttk.Label(speed_frame, text="Speed (ms/deg):").pack(anchor='w')
         ttk.Entry(speed_frame, textvariable=self.speed_var, width=8, justify='center').pack(pady=5)
         ttk.Button(speed_frame, text="Set Speed", command=self.set_speed).pack(pady=5)
-        
+
         # Sequence control
         seq_frame = ttk.LabelFrame(right_frame, text="Sequence Control", padding="5")
         seq_frame.pack(fill=tk.X, pady=5)
-        
+
         self.seq_listbox = tk.Listbox(seq_frame, height=8, width=25)
         self.seq_listbox.pack(fill=tk.X, pady=5)
         self.refresh_seq_list()
-        
+
         ttk.Button(seq_frame, text="Play Selected", command=self.play_sequence).pack(pady=2)
         ttk.Button(seq_frame, text="Stop", command=self.stop_sequence).pack(pady=2)
     
@@ -831,6 +845,30 @@ class UnifiedControlSystem:
         if self.is_connected:
             self.send_multi_move(pickup_angles)
         self.log("Moved to pickup position (simultaneous)")
+
+    def copy_current_angles(self):
+        """Copy current manual control angles to clipboard"""
+        angles = [int(self.input_boxes[i].get()) for i in range(5)]
+        self.step_clipboard = [angles]
+        self.log(f"📋 Copied current angles: {angles}")
+        messagebox.showinfo("Copied!", f"Current angles copied to clipboard:\n{angles}\n\nGo to Sequence Editor and click '📌 Paste Step' to paste")
+
+    def paste_to_sequences(self):
+        """Paste clipboard angles to sequence editor"""
+        if not hasattr(self, 'step_clipboard') or not self.step_clipboard:
+            messagebox.showinfo("Info", "Clipboard is empty\n\nCopy a step first from Sequence Editor")
+            return
+
+        if not self.current_cell:
+            messagebox.showwarning("Warning", "Select a cell in Sequence Editor first")
+            return
+
+        # Insert at end of current steps
+        for angles in self.step_clipboard:
+            self.steps_listbox.insert(tk.END, f"{self.steps_listbox.size() + 1}. {angles}")
+
+        self.renumber_steps()
+        self.log(f"📌 Pasted {len(self.step_clipboard)} step(s) to {self.current_cell}")
 
     def start_arduino_worker(self):
         """Start Arduino command worker thread"""
@@ -1645,11 +1683,30 @@ class UnifiedControlSystem:
         self.steps_listbox.insert(tk.END, f"{self.steps_listbox.size()+1}. {DEFAULT_REST}")
 
     def insert_step(self):
-        """Insert step at selected position"""
+        """Insert step at selected position or paste from clipboard"""
         if not self.current_cell:
             messagebox.showwarning("Warning", "Select a cell first")
             return
 
+        # Check if clipboard has steps to paste
+        if hasattr(self, 'step_clipboard') and self.step_clipboard:
+            # Ask user if they want to paste or create new
+            result = messagebox.askyesno("Paste or Create?",
+                "Clipboard has steps.\n\nYes = Paste from clipboard\nNo = Create new step")
+
+            if result:  # Paste from clipboard
+                selection = self.steps_listbox.curselection()
+                insert_pos = selection[0] if selection else tk.END
+
+                for angles in self.step_clipboard:
+                    self.steps_listbox.insert(insert_pos if insert_pos != tk.END else tk.END,
+                                             f"{self.steps_listbox.size() + 1}. {angles}")
+
+                self.renumber_steps()
+                self.log(f"📌 Inserted {len(self.step_clipboard)} step(s) from clipboard")
+                return
+
+        # Create new step dialog
         selection = self.steps_listbox.curselection()
         if not selection:
             messagebox.showwarning("Warning", "Select where to insert the step")
