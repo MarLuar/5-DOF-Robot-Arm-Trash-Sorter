@@ -364,13 +364,16 @@ class UnifiedControlSystem:
         self.selected_cell_label.pack(anchor='w', pady=5)
         
         ttk.Label(mid_frame, text="Steps (servo angles: Base Shoulder Elbow Wrist Gripper):").pack(anchor='w', pady=(10,0))
-        
+
         self.steps_listbox = tk.Listbox(mid_frame, height=12, width=55)
         self.steps_listbox.pack(fill=tk.BOTH, expand=True)
-        
+
+        # Setup right-click context menu for steps
+        self.setup_step_context_menu()
+
         step_btn_frame = ttk.Frame(mid_frame)
         step_btn_frame.pack(fill=tk.X, pady=5)
-        
+
         ttk.Button(step_btn_frame, text="Add Current", command=self.add_current_step).pack(side=tk.LEFT, padx=2)
         ttk.Button(step_btn_frame, text="Add Rest", command=self.add_rest_step).pack(side=tk.LEFT, padx=2)
         ttk.Button(step_btn_frame, text="Remove", command=self.remove_step).pack(side=tk.LEFT, padx=2)
@@ -1177,10 +1180,23 @@ class UnifiedControlSystem:
             self.log(f"No sequence saved for {cell}")
 
     def load_selected_sequence_to_editor(self):
-        """Load selected sequence from listbox into editor"""
+        """Load selected sequence - works with cell selection OR sequence listbox"""
+        # First try cell selection (primary method)
+        cell_selection = self.cell_listbox.curselection()
+        if cell_selection:
+            cell = CELL_NAMES[cell_selection[0]]
+            if cell in self.sequences:
+                self.on_cell_select(None)
+                self.log(f"Loaded {cell} sequence for editing ({len(self.sequences[cell])} steps)")
+                return
+            else:
+                messagebox.showinfo("Info", f"No sequence saved for {cell}\n\nCreate one by adding steps and clicking 'Save Sequence to Cell'")
+                return
+
+        # Fallback to sequence listbox
         selection = self.seq_listbox.curselection()
         if not selection:
-            messagebox.showwarning("Warning", "Select a sequence first")
+            messagebox.showwarning("Warning", "Select a cell from the left list first")
             return
 
         seq_name = self.seq_listbox.get(selection[0])
@@ -1189,7 +1205,7 @@ class UnifiedControlSystem:
 
         # Find which cell this sequence belongs to
         for cell, seq in self.sequences.items():
-            if seq == self.sequences[seq_name]:
+            if seq == self.sequences.get(seq_name):
                 # Select that cell
                 cell_index = CELL_NAMES.index(cell)
                 self.cell_listbox.selection_clear(0, tk.END)
@@ -1308,10 +1324,172 @@ class UnifiedControlSystem:
         selection = self.steps_listbox.curselection()
         if selection:
             self.steps_listbox.delete(selection[0])
-    
+            self.renumber_steps()
+
     def clear_steps(self):
         """Clear all steps"""
         self.steps_listbox.delete(0, tk.END)
+
+    def renumber_steps(self):
+        """Renumber all steps in listbox"""
+        items = []
+        for i in range(self.steps_listbox.size()):
+            item = self.steps_listbox.get(i)
+            try:
+                angles_str = item.split('. ')[1]
+                items.append(angles_str)
+            except:
+                items.append(f"[0, 0, 0, 0, 0]")
+
+        self.steps_listbox.delete(0, tk.END)
+        for i, item in enumerate(items):
+            self.steps_listbox.insert(tk.END, f"{i + 1}. {item}")
+
+    def setup_step_context_menu(self):
+        """Setup right-click context menu for steps listbox"""
+        # Create context menu
+        self.step_menu = tk.Menu(self.root, tearoff=0)
+        self.step_menu.add_command(label="✏️ Edit Step", command=self.edit_selected_step)
+        self.step_menu.add_separator()
+        self.step_menu.add_command(label="📋 Copy Step", command=self.copy_selected_step)
+        self.step_menu.add_command(label="📋 Copy All Steps", command=self.copy_all_steps)
+        self.step_menu.add_separator()
+        self.step_menu.add_command(label="✂️ Cut Step", command=self.cut_selected_step)
+        self.step_menu.add_separator()
+        self.step_menu.add_command(label="🗑️ Delete Step", command=self.remove_step)
+        self.step_menu.add_separator()
+        self.step_menu.add_command(label="📌 Paste Step", command=self.paste_step)
+
+        # Bind right-click and double-click
+        self.steps_listbox.bind('<Button-3>', self.show_step_menu)
+        self.steps_listbox.bind('<Double-Button-1>', lambda e: self.edit_selected_step())
+
+        # Clipboard for steps
+        self.step_clipboard = []
+
+    def show_step_menu(self, event):
+        """Show context menu on right-click"""
+        try:
+            self.step_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.step_menu.grab_release()
+
+    def edit_selected_step(self):
+        """Edit selected step angles"""
+        selection = self.steps_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Warning", "Select a step to edit")
+            return
+
+        step_idx = selection[0]
+        item = self.steps_listbox.get(step_idx)
+
+        # Parse current angles
+        try:
+            angles_str = item.split('. ')[1].strip('[]')
+            current_angles = [int(x.strip()) for x in angles_str.split(',')]
+        except:
+            messagebox.showerror("Error", "Could not parse step")
+            return
+
+        # Create edit dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Edit Step {step_idx + 1}")
+        dialog.geometry("400x300")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text=f"Edit Step {step_idx + 1} Angles:", font=('Helvetica', 12, 'bold')).pack(pady=10)
+
+        # Create angle inputs
+        angle_vars = []
+        angles_frame = ttk.Frame(dialog)
+        angles_frame.pack(pady=10)
+
+        for i, name in enumerate(JOINT_NAMES):
+            frame = ttk.Frame(angles_frame)
+            frame.grid(row=i, column=0, padx=10, pady=5)
+
+            ttk.Label(frame, text=f"{name}:", width=10).pack(side=tk.LEFT)
+            var = tk.StringVar(value=str(current_angles[i]))
+            ttk.Entry(frame, textvariable=var, width=6, justify='center').pack(side=tk.LEFT)
+            angle_vars.append(var)
+
+        def save_edit():
+            try:
+                new_angles = [int(var.get()) for var in angle_vars]
+
+                # Validate
+                for i, angle in enumerate(new_angles):
+                    if angle < 0 or angle > 180:
+                        messagebox.showwarning("Warning", f"{JOINT_NAMES[i]} angle must be 0-180°")
+                        return
+
+                # Update step
+                self.steps_listbox.delete(step_idx)
+                self.steps_listbox.insert(step_idx, f"{step_idx + 1}. {new_angles}")
+                self.log(f"Edited step {step_idx + 1}: {new_angles}")
+                dialog.destroy()
+            except ValueError:
+                messagebox.showerror("Error", "All angles must be numbers")
+
+        ttk.Button(dialog, text="Save Changes", command=save_edit).pack(pady=10)
+        ttk.Button(dialog, text="Cancel", command=dialog.destroy).pack()
+
+    def copy_selected_step(self):
+        """Copy selected step to clipboard"""
+        selection = self.steps_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Warning", "Select a step to copy")
+            return
+
+        step_idx = selection[0]
+        item = self.steps_listbox.get(step_idx)
+
+        try:
+            angles_str = item.split('. ')[1].strip('[]')
+            angles = [int(x.strip()) for x in angles_str.split(',')]
+            self.step_clipboard = [angles]
+            self.log(f"Copied step {step_idx + 1}: {angles}")
+        except:
+            messagebox.showerror("Error", "Could not copy step")
+
+    def copy_all_steps(self):
+        """Copy all steps to clipboard"""
+        if not self.current_cell or self.current_cell not in self.sequences:
+            messagebox.showwarning("Warning", "No sequence loaded")
+            return
+
+        self.step_clipboard = [step['angles'] for step in self.sequences[self.current_cell]]
+        self.log(f"Copied all {len(self.step_clipboard)} steps from {self.current_cell}")
+
+    def cut_selected_step(self):
+        """Cut selected step to clipboard"""
+        self.copy_selected_step()
+        self.remove_step()
+
+    def paste_step(self):
+        """Paste step from clipboard"""
+        if not self.step_clipboard:
+            messagebox.showinfo("Info", "Clipboard is empty\n\nCopy a step first")
+            return
+
+        if not self.current_cell:
+            messagebox.showwarning("Warning", "Select a cell first")
+            return
+
+        # Get insertion position
+        selection = self.steps_listbox.curselection()
+        insert_pos = selection[0] if selection else tk.END
+
+        # Paste all steps from clipboard
+        for i, angles in enumerate(self.step_clipboard):
+            self.steps_listbox.insert(insert_pos if insert_pos != tk.END else tk.END, f"{self.steps_listbox.size() + 1}. {angles}")
+
+        self.log(f"Pasted {len(self.step_clipboard)} step(s)")
+
+        # Renumber steps
+        self.renumber_steps()
     
     def save_current_sequence(self):
         """Save sequence to cell"""
