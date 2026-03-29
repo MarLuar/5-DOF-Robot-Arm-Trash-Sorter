@@ -944,18 +944,21 @@ class UnifiedControlSystem:
         messagebox.showinfo("Pasted!", f"Angles pasted to Manual Control:\n{angles}\n\nClick 'Send' on any servo to move to this position")
 
     def send_to_arduino(self, command):
-        """Send command to Arduino directly (non-blocking) with debug timing"""
+        """Send command to Arduino with proper buffer management"""
         if self.is_connected and self.serial_conn and self.serial_conn.is_open:
             try:
-                start_time = time.time()
-                with self.serial_lock:
-                    self.serial_conn.write(command.encode())
-                    self.serial_conn.flush()
-                elapsed = time.time() - start_time
-                # Log slow sends
-                if elapsed > 0.1:
-                    self.log(f"⏱️ Serial send took {elapsed:.3f}s: {command.strip()}")
-                # Don't sleep inside lock - allows other commands to queue
+                # Clear both buffers before sending
+                if self.serial_conn.in_waiting > 0:
+                    self.serial_conn.reset_input_buffer()
+                if self.serial_conn.out_waiting > 0:
+                    self.serial_conn.reset_output_buffer()
+
+                # Send command
+                self.serial_conn.write(command.encode())
+                self.serial_conn.flush()
+
+                # Wait for Arduino to process (critical for preventing buffer buildup)
+                time.sleep(0.1)
             except Exception as e:
                 self.log(f"Serial error: {e}")
 
@@ -1167,10 +1170,9 @@ class UnifiedControlSystem:
                     self.send_to_arduino(command)
                     self._safe_after(0, lambda a=angles: self.log(f"  → Sent: {a}"))
 
-                    # Wait for servo movement (minimum 0.5 seconds)
-                    # Check stop flag during wait
+                    # Wait for servo movement (minimum 1.0 seconds to let Arduino execute)
                     wait_start = time.time()
-                    while time.time() - wait_start < max(0.5, delay / 1000.0):
+                    while time.time() - wait_start < max(1.0, delay / 1000.0):
                         if getattr(self, '_stop_sequence_flag', False):
                             break
                         time.sleep(0.1)
@@ -1642,9 +1644,9 @@ class UnifiedControlSystem:
 
                     self._safe_after(0, lambda s=i+1, c=cell: self.log(f"  Step {s}/{len(self.sequences[c])}: {angles}"))
 
-                    # Wait for servo movement (minimum 0.5 seconds)
+                    # Wait for servo movement (minimum 1.0 seconds to let Arduino execute)
                     wait_start = time.time()
-                    while time.time() - wait_start < max(0.5, delay / 1000.0):
+                    while time.time() - wait_start < max(1.0, delay / 1000.0):
                         if getattr(self, '_stop_sequence_flag', False):
                             break
                         time.sleep(0.1)
