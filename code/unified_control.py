@@ -143,6 +143,11 @@ class UnifiedControlSystem:
         self.canvas_width = 640  # Cache canvas size
         self.canvas_height = 480  # Cache canvas size
 
+        # Sequence control flags
+        self._stop_sequence_flag = False
+        self._current_sequence_thread = None
+        self._current_pickup_thread = None
+
         # Debug: Track thread activity
         self.main_thread_id = threading.current_thread().ident
         self.last_command_time = 0
@@ -1111,12 +1116,14 @@ class UnifiedControlSystem:
             self.log("⚠ Not connected to Arduino!")
             return
 
-        # Cancel any currently playing sequence
-        if hasattr(self, '_current_sequence_thread') and self._current_sequence_thread is not None:
-            self.log("⚠️ Stopping previous sequence...")
+        # Set stop flag for any currently playing sequence
+        self._stop_sequence_flag = True
+        self.log("⏹️ Stopping previous sequence...")
+        time.sleep(0.1)  # Give thread time to stop
 
         # Start new sequence in background thread
         self.log(f"▶ Playing sequence: {seq_name}")
+        self._stop_sequence_flag = False
         thread = threading.Thread(target=self._play_sequence_thread, args=(seq_name,), daemon=True)
         self._current_sequence_thread = thread
         thread.start()
@@ -1127,6 +1134,11 @@ class UnifiedControlSystem:
             self.log(f"⏱️ Starting sequence {seq_name} at {time.time():.3f}")
 
             for i, step in enumerate(self.sequences[seq_name]):
+                # Check if we should stop
+                if getattr(self, '_stop_sequence_flag', False):
+                    self.log("⏹️ Sequence stopped by user")
+                    break
+
                 if 'angles' in step:
                     # Send multi-move command
                     angles = step['angles']
@@ -1138,7 +1150,12 @@ class UnifiedControlSystem:
                     self.root.after(0, lambda a=angles: self.log(f"  → Sent: {a}"))
 
                     # Wait for servo movement (minimum 0.5 seconds)
-                    time.sleep(max(0.5, delay / 1000.0))
+                    # Check stop flag during wait
+                    wait_start = time.time()
+                    while time.time() - wait_start < max(0.5, delay / 1000.0):
+                        if getattr(self, '_stop_sequence_flag', False):
+                            break
+                        time.sleep(0.1)
 
                     step_elapsed = time.time() - step_start
                     if step_elapsed > 0.6:
@@ -1155,7 +1172,8 @@ class UnifiedControlSystem:
 
     def stop_sequence(self):
         """Stop sequence (placeholder)"""
-        self.log("Sequence stopped")
+        self._stop_sequence_flag = True
+        self.log("⏹️ Sequence stopped")
     
     # Calibration Methods
     def start_calib_preview(self):
@@ -1571,10 +1589,12 @@ class UnifiedControlSystem:
         self.log(f"🤖 Starting pickup sequence for {cell}...")
         self.pickup_btn.config(state='disabled')
 
-        # Cancel any currently playing sequence
-        if hasattr(self, '_current_pickup_thread') and self._current_pickup_thread is not None:
-            self.log("⚠️ Stopping previous pickup...")
+        # Set stop flag for any currently playing sequence
+        self._stop_sequence_flag = True
+        time.sleep(0.1)  # Give thread time to stop
 
+        # Start new pickup sequence
+        self._stop_sequence_flag = False
         thread = threading.Thread(target=self._execute_pickup_sequence, args=(cell,), daemon=True)
         self._current_pickup_thread = thread
         thread.start()
@@ -1585,6 +1605,11 @@ class UnifiedControlSystem:
             self.log(f"⏱️ Starting pickup for {cell} at {time.time():.3f}")
 
             for i, step in enumerate(self.sequences[cell]):
+                # Check if we should stop
+                if getattr(self, '_stop_sequence_flag', False):
+                    self.log("⏹️ Pickup stopped")
+                    break
+
                 if 'angles' in step:
                     angles = step['angles']
                     delay = step.get('delay', 1000)
@@ -1597,7 +1622,11 @@ class UnifiedControlSystem:
                     self.root.after(0, lambda s=i+1, c=cell: self.log(f"  Step {s}/{len(self.sequences[c])}: {angles}"))
 
                     # Wait for servo movement (minimum 0.5 seconds)
-                    time.sleep(max(0.5, delay / 1000.0))
+                    wait_start = time.time()
+                    while time.time() - wait_start < max(0.5, delay / 1000.0):
+                        if getattr(self, '_stop_sequence_flag', False):
+                            break
+                        time.sleep(0.1)
 
                     step_elapsed = time.time() - step_start
                     if step_elapsed > 0.6:
