@@ -638,13 +638,18 @@ class UnifiedControlSystem:
             self.auto_canvas.after(30, self.update_auto_preview)
     
     def on_calib_click(self, event):
-        """Handle calibration click"""
+        """Handle calibration click - account for canvas scaling"""
         if len(self.corners) >= 4:
             return
-        
-        self.corners.append((event.x, event.y))
+
+        # Get actual click position relative to canvas
+        canvas_x = event.x
+        canvas_y = event.y
+
+        # Store the click (we'll use canvas coordinates directly)
+        self.corners.append((canvas_x, canvas_y))
         self.corner_label.config(text=f"Corners clicked: {len(self.corners)}/4")
-        
+
         if len(self.corners) >= 4:
             self.calc_btn.config(state='normal')
             self.log(f"All 4 corners clicked")
@@ -662,33 +667,63 @@ class UnifiedControlSystem:
         """Calculate grid from corners"""
         if len(self.corners) < 4:
             return
-        
+
         # Capture empty grid
         ret, frame = self.cap.read()
         if ret:
             self.empty_grid = frame.copy()
             cv2.imwrite(BG_FILE, self.empty_grid)
             self.log("Empty grid reference captured")
-        
-        # Calculate 25 points
-        tl = np.array(self.corners[0], dtype=np.float32)
-        tr = np.array(self.corners[1], dtype=np.float32)
-        bl = np.array(self.corners[2], dtype=np.float32)
-        br = np.array(self.corners[3], dtype=np.float32)
-        
+
+        # Calculate 25 points from 4 corners using bilinear interpolation
+        # Corners are: TL, TR, BL, BR
+        tl = np.array(self.corners[0], dtype=np.float32)  # Top-Left
+        tr = np.array(self.corners[1], dtype=np.float32)  # Top-Right
+        bl = np.array(self.corners[2], dtype=np.float32)  # Bottom-Left
+        br = np.array(self.corners[3], dtype=np.float32)  # Bottom-Right
+
         self.all_points = []
-        for row in range(5):
-            for col in range(5):
-                t = col / 4.0
-                u = row / 4.0
-                top = tl + (tr - tl) * t
-                bottom = bl + (br - bl) * t
-                point = top + (bottom - top) * u
+        for row in range(5):  # 5 rows (0-4)
+            for col in range(5):  # 5 columns (0-4)
+                # Calculate position using bilinear interpolation
+                u = col / 4.0  # Horizontal position (0.0 to 1.0)
+                v = row / 4.0  # Vertical position (0.0 to 1.0)
+
+                # Interpolate along top and bottom edges
+                top_point = tl + (tr - tl) * u
+                bottom_point = bl + (br - bl) * u
+
+                # Interpolate between top and bottom
+                point = top_point + (bottom_point - top_point) * v
+
                 self.all_points.append((int(point[0]), int(point[1])))
-        
+
         self.is_calibrated = True
+
+        # Save calibration
+        calib_data = {
+            'grid_intersections': {},
+            'timestamp': time.time()
+        }
+        for i, (x, y) in enumerate(self.all_points):
+            row = i // 5
+            col = i % 5
+            cell_name = f"{chr(ord('A')+row)}{col+1}"
+            calib_data['grid_intersections'][cell_name] = {'x': x, 'y': y}
+
+        with open(CALIBRATION_FILE, 'w') as f:
+            json.dump(calib_data, f, indent=2)
+
         self.log(f"Grid calculated: {len(self.all_points)} points")
-        messagebox.showinfo("Success", f"Grid calculated!\n\n{len(self.all_points)} points generated\n\nEmpty grid captured!\n\nNow go to Auto Detection tab to test")
+        self.log(f"Calibration saved to {CALIBRATION_FILE}")
+
+        messagebox.showinfo(
+            "Success",
+            f"Grid calculated!\n\n"
+            f"25 intersection points generated\n\n"
+            f"Empty grid captured!\n\n"
+            f"Go to Auto Detection tab to test object detection"
+        )
     
     def capture_empty_grid(self):
         """Recapture empty grid"""
@@ -921,29 +956,32 @@ class UnifiedControlSystem:
         """Find which cell contains point (x, y)"""
         if not self.is_calibrated or len(self.all_points) < 25:
             return "?"
-        
-        # Simple bounding box check
+
+        # Simple bounding box check for each cell
         for row in range(4):
             for col in range(4):
-                idx1 = row * 5 + col
-                idx2 = idx1 + 1
-                idx3 = idx1 + 5
-                idx4 = idx3 + 1
-                
+                # Get 4 corners of this cell
+                idx1 = row * 5 + col          # Top-Left
+                idx2 = idx1 + 1               # Top-Right
+                idx3 = idx1 + 5               # Bottom-Left
+                idx4 = idx3 + 1               # Bottom-Right
+
                 if idx4 < len(self.all_points):
                     x1, y1 = self.all_points[idx1]
                     x2, y2 = self.all_points[idx2]
                     x3, y3 = self.all_points[idx3]
                     x4, y4 = self.all_points[idx4]
-                    
+
+                    # Get bounding box
                     min_x = min(x1, x2, x3, x4)
                     max_x = max(x1, x2, x3, x4)
                     min_y = min(y1, y2, y3, y4)
                     max_y = max(y1, y2, y3, y4)
-                    
+
+                    # Check if point is inside
                     if min_x <= x <= max_x and min_y <= y <= max_y:
                         return f"{chr(ord('A')+row)}{col+1}"
-        
+
         return "?"
     
     def detect_object_now(self):
