@@ -599,55 +599,78 @@ class UnifiedControlSystem:
         
         self.is_calibrated = True
         self.log(f"Grid calculated: {len(self.all_points)} points")
-        messagebox.showinfo("Success", f"Grid calculated!\n\n{len(self.all_points)} points generated\n\nEmpty grid captured!\n\nNow go to Auto Detection tab to test")
 
-        # Draw digital grid lines on canvas
+        # Draw grid overlay immediately
         self.draw_grid_overlay()
+
+        messagebox.showinfo("Success", f"Grid calculated!\n\n{len(self.all_points)} points generated\n\nEmpty grid captured!\n\nGrid lines should now be visible!\n\nGo to Auto Detection tab to test")
 
     def draw_grid_overlay(self):
         """Draw digital grid lines on calibration canvas"""
-        if not self.is_calibrated or len(self.all_points) < 25:
-            return
+        try:
+            if not self.is_calibrated:
+                self.log("Cannot draw overlay: not calibrated")
+                return
 
-        # Get current frame from camera
-        ret, frame = self.cap.read()
-        if not ret:
-            return
+            if len(self.all_points) < 25:
+                self.log(f"Cannot draw overlay: only {len(self.all_points)} points")
+                return
 
-        # Draw grid lines on frame
-        for row in range(5):
-            # Draw horizontal line
-            idx1 = row * 5
-            idx2 = idx1 + 4
-            if idx2 < len(self.all_points):
-                pt1 = self.all_points[idx1]
-                pt2 = self.all_points[idx2]
-                cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
+            self.log(f"Drawing grid overlay with {len(self.all_points)} points...")
 
-        for col in range(5):
-            # Draw vertical line
-            idx1 = col
-            idx2 = col + 20
-            if idx2 < len(self.all_points):
-                pt1 = self.all_points[idx1]
-                pt2 = self.all_points[idx2]
-                cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
+            # Get current frame from camera
+            ret, frame = self.cap.read()
+            if not ret:
+                self.log("Cannot draw overlay: camera not available")
+                return
 
-        # Draw corner points
-        corner_colors = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (0, 255, 255)]
-        for i in range(4):
-            if i < len(self.all_points):
-                x, y = self.all_points[i]
-                cv2.circle(frame, (x, y), 10, corner_colors[i], -1)
+            self.log("Camera frame obtained, drawing lines...")
 
-        # Convert and display
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(frame)
-        photo = ImageTk.PhotoImage(image=img)
+            # Draw grid lines on frame
+            for row in range(5):
+                # Draw horizontal line
+                idx1 = row * 5
+                idx2 = idx1 + 4
+                if idx2 < len(self.all_points):
+                    pt1 = self.all_points[idx1]
+                    pt2 = self.all_points[idx2]
+                    self.log(f"  Horizontal {row}: {pt1} -> {pt2}")
+                    cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
 
-        self.calib_canvas.delete("all")
-        self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
-        self.calib_canvas.image = photo
+            for col in range(5):
+                # Draw vertical line
+                idx1 = col
+                idx2 = col + 20
+                if idx2 < len(self.all_points):
+                    pt1 = self.all_points[idx1]
+                    pt2 = self.all_points[idx2]
+                    self.log(f"  Vertical {col}: {pt1} -> {pt2}")
+                    cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
+
+            # Draw corner points
+            corner_colors = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (0, 255, 255)]
+            corner_names = ['TL', 'TR', 'BL', 'BR']
+            for i in range(4):
+                if i < len(self.all_points):
+                    x, y = self.all_points[i]
+                    cv2.circle(frame, (x, y), 10, corner_colors[i], -1)
+                    cv2.putText(frame, corner_names[i], (x+15, y-15),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, corner_colors[i], 2)
+
+            # Convert and display
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(frame)
+            photo = ImageTk.PhotoImage(image=img)
+
+            self.calib_canvas.delete("all")
+            self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
+            self.calib_canvas.image = photo
+
+            self.log("✓ Grid overlay drawn successfully!")
+        except Exception as e:
+            self.log(f"✗ Error drawing overlay: {e}")
+            import traceback
+            self.log(traceback.format_exc())
     
     def capture_empty_grid(self):
         """Recapture empty grid"""
