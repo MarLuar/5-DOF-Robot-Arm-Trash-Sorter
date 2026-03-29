@@ -535,6 +535,10 @@ class UnifiedControlSystem:
     def start_camera(self):
         """Start single camera instance"""
         self.cap = cv2.VideoCapture(2)
+        if not self.cap.isOpened():
+            self.log("Warning: Could not open camera on /dev/video2, trying /dev/video0...")
+            self.cap = cv2.VideoCapture(0)
+
         if self.cap.isOpened():
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -544,23 +548,12 @@ class UnifiedControlSystem:
             self.update_calib_preview()
             self.update_auto_preview()
         else:
-            self.log("Warning: Could not open camera on /dev/video2")
-            # Try video0 as fallback
-            self.cap = cv2.VideoCapture(0)
-            if self.cap.isOpened():
-                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                self.is_running = True
-                self.log("Camera started on /dev/video0 (fallback)")
-                self.update_calib_preview()
-                self.update_auto_preview()
-            else:
-                self.log("ERROR: No camera available!")
-                messagebox.showerror("Camera Error", "Could not open any camera!\n\nMake sure:\n1. Camera is plugged in\n2. Not used by another program\n3. Try: ls -la /dev/video*")
+            self.log("ERROR: No camera available!")
+            messagebox.showerror("Camera Error", "Could not open any camera!\n\nMake sure:\n1. Camera is plugged in\n2. Not used by another program\n3. Try: ls -la /dev/video*")
 
     def update_calib_preview(self):
         """Update calibration tab preview"""
-        if not hasattr(self, 'cap') or self.cap is None:
+        if not hasattr(self, 'cap') or self.cap is None or not self.cap.isOpened():
             return
 
         ret, frame = self.cap.read()
@@ -570,19 +563,37 @@ class UnifiedControlSystem:
                 color = [(0,0,255), (255,0,0), (0,255,0), (0,255,255)][i]
                 cv2.circle(frame, (x, y), 10, color, -1)
 
+            # Convert BGR to RGB
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Get canvas size
+            canvas_width = self.calib_canvas.winfo_width()
+            canvas_height = self.calib_canvas.winfo_height()
+
+            if canvas_width > 1 and canvas_height > 1:
+                # Scale image to fit canvas
+                img_height, img_width = frame.shape[:2]
+                scale = min(canvas_width / img_width, canvas_height / img_height)
+                new_width = int(img_width * scale)
+                new_height = int(img_height * scale)
+                frame = cv2.resize(frame, (new_width, new_height))
+
+            # Convert to PhotoImage
             img = Image.fromarray(frame)
             photo = ImageTk.PhotoImage(image=img)
 
+            # Update canvas
+            self.calib_canvas.delete("all")
             self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
             self.calib_canvas.image = photo
 
+        # Schedule next update
         if hasattr(self, 'calib_canvas'):
             self.calib_canvas.after(30, self.update_calib_preview)
 
     def update_auto_preview(self):
         """Update auto detection tab preview"""
-        if not hasattr(self, 'cap') or self.cap is None:
+        if not hasattr(self, 'cap') or self.cap is None or not self.cap.isOpened():
             return
 
         ret, frame = self.cap.read()
@@ -598,13 +609,31 @@ class UnifiedControlSystem:
                     cv2.putText(frame, f"Cell: {obj.get('cell', '?')}", (x, y-10),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
+            # Convert BGR to RGB
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Get canvas size
+            canvas_width = self.auto_canvas.winfo_width()
+            canvas_height = self.auto_canvas.winfo_height()
+
+            if canvas_width > 1 and canvas_height > 1:
+                # Scale image to fit canvas
+                img_height, img_width = frame.shape[:2]
+                scale = min(canvas_width / img_width, canvas_height / img_height)
+                new_width = int(img_width * scale)
+                new_height = int(img_height * scale)
+                frame = cv2.resize(frame, (new_width, new_height))
+
+            # Convert to PhotoImage
             img = Image.fromarray(frame)
             photo = ImageTk.PhotoImage(image=img)
 
+            # Update canvas
+            self.auto_canvas.delete("all")
             self.auto_canvas.create_image(0, 0, anchor='nw', image=photo)
             self.auto_canvas.image = photo
 
+        # Schedule next update
         if hasattr(self, 'auto_canvas'):
             self.auto_canvas.after(30, self.update_auto_preview)
     
