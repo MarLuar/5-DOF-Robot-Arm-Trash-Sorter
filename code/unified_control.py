@@ -1995,8 +1995,8 @@ class UnifiedControlSystem:
 
         # Log detected objects
         if objects:
-            for obj in objects:
-                self.log(f"📍 Object detected at ({obj['cx']}, {obj['cy']}) in cell {obj['cell']}")
+            # Detection status shown in static display, no need to log
+            pass
 
         return objects
     
@@ -2039,10 +2039,8 @@ class UnifiedControlSystem:
 
             if 0 <= row < 4 and 0 <= col < 4:
                 cell = f"{chr(ord('A')+row)}{col+1}"
-                self.log(f"find_cell fallback: ({x},{y}) -> {cell} (grid: {w}x{h})")
                 return cell
 
-        self.log(f"find_cell: ({x},{y}) -> ? (calibrated={self.is_calibrated}, points={len(self.all_points) if hasattr(self, 'all_points') else 0})")
         return "?"
     
     def load_calibration(self):
