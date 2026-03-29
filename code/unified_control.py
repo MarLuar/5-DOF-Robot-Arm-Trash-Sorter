@@ -132,6 +132,11 @@ class UnifiedControlSystem:
         self.detected_objects = []  # List of detected objects with cell info
         self.current_detection_cell = None  # Cell with detected object
 
+        # Detection state persistence (prevents flickering)
+        self.last_detection_time = 0
+        self.detection_timeout = 3.0  # Keep detection for 3 seconds
+        self.last_detected_cell = None
+
         # Performance optimizations
         self.serial_lock = threading.Lock()  # Thread-safe serial access
         self.arduino_queue = queue.Queue()  # Command queue for Arduino
@@ -446,13 +451,14 @@ class UnifiedControlSystem:
         log_frame.pack(fill=tk.X, padx=5, pady=5)
 
         self.log_text = scrolledtext.ScrolledText(log_frame, height=6, width=120, state='disabled')
-        self.log_text.pack(fill=tk.X)
+        self.log_text.pack(fill=tk.X, pady=(0, 5))
 
-        # Button to open floating log window
+        # Button to open floating log window - more visible placement
         btn_frame = ttk.Frame(log_frame)
-        btn_frame.pack(fill=tk.X, pady=(5, 0))
+        btn_frame.pack(fill=tk.X)
 
-        ttk.Button(btn_frame, text="🪟 Open Floating Log Window", command=self.open_floating_log).pack(side=tk.LEFT)
+        ttk.Separator(log_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+        ttk.Button(btn_frame, text="🪟 Open Floating Log Window", command=self.open_floating_log).pack(side=tk.LEFT, padx=5, pady=5)
 
         # Floating log window reference
         self.floating_log_window = None
@@ -982,22 +988,30 @@ class UnifiedControlSystem:
             if self.detect_in_calib_var.get() and hasattr(self, 'empty_grid') and self.empty_grid is not None:
                 if self.frame_count % 5 == 0:  # Detect every 5th frame
                     objects = self.detect_objects(frame)
+                    if objects:
+                        self.last_detection_time = time.time()
+                        self.last_detected_cell = max(objects, key=lambda o: o['area'])
+                        self.last_detected_cell['cell'] = self.find_cell(self.last_detected_cell['cx'], self.last_detected_cell['cy'])
                 else:
-                    objects = []
+                    # Use last detection if within timeout (prevents flickering)
+                    if time.time() - self.last_detection_time < self.detection_timeout and self.last_detected_cell:
+                        objects = [self.last_detected_cell]
+                    else:
+                        objects = []
+                        self.last_detected_cell = None
 
                 # Track detected objects and enable pickup button
                 self.detected_objects = objects
 
-                if objects:
-                    # Get the cell with the largest object (most prominent)
-                    largest_obj = max(objects, key=lambda o: o['area'])
-                    cell = self.find_cell(largest_obj['cx'], largest_obj['cy'])
+                if objects and self.last_detected_cell:
+                    # Use the persisted detection
+                    cell = self.last_detected_cell.get('cell', '?')
 
                     # Debug logging
-                    self.log(f"Detection: cell={cell}, has_sequence={cell in self.sequences if cell else False}, sequences={list(self.sequences.keys())}")
+                    self.log(f"Detection: cell={cell}, has_sequence={cell in self.sequences if cell != '?' else False}, sequences={list(self.sequences.keys())}")
 
                     # Check if cell has a sequence and is A, B, or C (not D)
-                    if cell and cell in self.sequences and cell[0] in ['A', 'B', 'C']:
+                    if cell and cell != '?' and cell in self.sequences and cell[0] in ['A', 'B', 'C']:
                         self.current_detection_cell = cell
                         self.pickup_btn.config(state='normal')
                         self.detection_status_label.config(
@@ -1008,7 +1022,7 @@ class UnifiedControlSystem:
                     else:
                         self.current_detection_cell = None
                         self.pickup_btn.config(state='disabled')
-                        if cell:
+                        if cell and cell != '?':
                             if cell[0] in ['A', 'B', 'C']:
                                 self.detection_status_label.config(
                                     text=f"Object in {cell} (no sequence - create one first!)",
