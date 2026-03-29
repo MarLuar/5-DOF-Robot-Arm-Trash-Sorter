@@ -221,15 +221,21 @@ class UnifiedControlSystem:
         self.calc_btn = ttk.Button(btn_frame, text="Calculate Grid", command=self.calculate_grid, state='disabled')
         self.calc_btn.pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Recapture Empty Grid", command=self.capture_empty_grid).pack(side=tk.LEFT, padx=5)
-        
+
+        # Object detection toggle
+        self.detect_in_calib_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(btn_frame, text="Show Object Detection",
+                       variable=self.detect_in_calib_var,
+                       command=self.toggle_detection_in_calib).pack(side=tk.LEFT, padx=10)
+
         # Right: Instructions & Sensitivity
         right_frame = ttk.Frame(self.calib_tab)
         right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
-        
+
         # Instructions
         instr_frame = ttk.LabelFrame(right_frame, text="Instructions", padding="10")
         instr_frame.pack(fill=tk.X, pady=5)
-        
+
         instructions = """1. Click 4 grid corners in order:
    - Top-Left (Red)
    - Top-Right (Blue)
@@ -240,13 +246,16 @@ class UnifiedControlSystem:
    - Calculates 25 points
    - Captures empty grid reference
 
-3. Verify grid overlay
+3. Enable "Show Object Detection"
+   - Detects objects in real-time
+   - Shows which cell object is in
 
-4. Switch to Auto Detection tab
-   to test object detection
+4. Place object on grid
+   - See which cell it's detected in
+   - Yellow boxes show detections
 """
         ttk.Label(instr_frame, text=instructions, justify=tk.LEFT).pack(anchor='w')
-        
+
         self.corner_label = ttk.Label(instr_frame, text="Corners clicked: 0/4", foreground='blue')
         self.corner_label.pack(pady=5)
         
@@ -624,6 +633,24 @@ class UnifiedControlSystem:
                         disp_y = int(self.all_points[i][1] * scale) + y_offset
                         cv2.circle(bg, (disp_x, disp_y), 10, corner_colors[i], -1)
 
+            # Object detection - draw detected objects (if enabled and empty grid is available)
+            if self.detect_in_calib_var.get() and hasattr(self, 'empty_grid') and self.empty_grid is not None:
+                objects = self.detect_objects(frame)
+                for obj in objects:
+                    # Scale detection coordinates to display coordinates
+                    disp_x = int(obj['x'] * scale) + x_offset
+                    disp_y = int(obj['y'] * scale) + y_offset
+                    disp_w = int(obj['w'] * scale)
+                    disp_h = int(obj['h'] * scale)
+
+                    # Draw detection box
+                    cv2.rectangle(bg, (disp_x, disp_y), (disp_x+disp_w, disp_y+disp_h), (0, 255, 255), 2)
+
+                    # Get cell name
+                    cell = self.find_cell(obj['cx'], obj['cy'])
+                    cv2.putText(bg, f"Object: {cell}", (disp_x, disp_y-10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
             # Convert BGR to RGB
             bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(bg)
@@ -792,6 +819,14 @@ class UnifiedControlSystem:
             cv2.imwrite(BG_FILE, self.empty_grid)
             self.log("Empty grid recaptured")
             messagebox.showinfo("Success", "Empty grid reference updated!")
+
+    def toggle_detection_in_calib(self):
+        """Toggle object detection in calibration tab"""
+        enabled = self.detect_in_calib_var.get()
+        if enabled:
+            self.log("Object detection enabled in calibration tab")
+        else:
+            self.log("Object detection disabled in calibration tab")
     
     def update_sensitivity_labels(self):
         """Update sensitivity labels"""
