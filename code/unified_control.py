@@ -462,7 +462,7 @@ class UnifiedControlSystem:
         """Called when connection fails"""
         messagebox.showerror("Error", f"Could not connect: {error}")
         self.log(f"Connection failed: {error}")
-    
+
     def disconnect(self):
         """Disconnect from Arduino"""
         if self.serial_conn:
@@ -501,9 +501,10 @@ class UnifiedControlSystem:
             command = f"{idx} {angle}\n"
             self.serial_conn.write(command.encode())
             # Update UI from main thread
-            self.root.after(0, lambda: self.log(f"Sent: {JOINT_NAMES[idx]} -> {angle}°"))
-        except Exception as e:
-            self.root.after(0, lambda: self.log(f"Error: {e}"))
+            self.root.after(0, lambda idx=idx, angle=angle: self.log(f"Sent: {JOINT_NAMES[idx]} -> {angle}°"))
+        except Exception as ex:
+            error_msg = str(ex)
+            self.root.after(0, lambda msg=error_msg: self.log(f"Error: {msg}"))
 
     def send_multi_move(self, angles):
         """Send multi-move command in background thread"""
@@ -520,9 +521,10 @@ class UnifiedControlSystem:
             command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
             self.serial_conn.write(command.encode())
             # Update UI from main thread
-            self.root.after(0, lambda: self.log(f"Sent multi-move: {angles} (simultaneous)"))
-        except Exception as e:
-            self.root.after(0, lambda: self.log(f"Error: {e}"))
+            self.root.after(0, lambda a=angles: self.log(f"Sent multi-move: {a} (simultaneous)"))
+        except Exception as ex:
+            error_msg = str(ex)
+            self.root.after(0, lambda msg=error_msg: self.log(f"Error: {msg}"))
 
     def set_speed(self):
         """Set movement speed in background thread"""
@@ -540,9 +542,10 @@ class UnifiedControlSystem:
             command = f"99 {speed}\n"
             self.serial_conn.write(command.encode())
             # Update UI from main thread
-            self.root.after(0, lambda: self.log(f"Speed set to {speed}ms/deg"))
-        except:
-            pass
+            self.root.after(0, lambda s=speed: self.log(f"Speed set to {s}ms/deg"))
+        except Exception as ex:
+            error_msg = str(ex)
+            self.root.after(0, lambda msg=error_msg: self.log(f"Error: {msg}"))
 
     def go_to_rest(self):
         """Go to rest position (simultaneous movement)"""
