@@ -610,23 +610,46 @@ class UnifiedControlSystem:
             self.seq_listbox.insert(tk.END, name)
     
     def play_sequence(self):
-        """Play selected sequence with simultaneous movement"""
+        """Play selected sequence with simultaneous movement in background thread"""
         selection = self.seq_listbox.curselection()
         if not selection:
+            self.log("⚠ No sequence selected")
             return
 
         seq_name = self.seq_listbox.get(selection[0])
         if seq_name not in self.sequences:
+            self.log(f"⚠ Sequence '{seq_name}' not found")
             return
 
-        self.log(f"Playing sequence: {seq_name}")
-        for step in self.sequences[seq_name]:
-            if self.is_connected and 'angles' in step:
-                # Use multi-move for simultaneous movement
-                self.send_multi_move(step['angles'])
-                time.sleep(step.get('delay', 1000) / 1000.0)
+        if not self.is_connected:
+            self.log("⚠ Not connected to Arduino!")
+            return
 
-        self.log("Sequence complete")
+        # Start playback in background thread
+        thread = threading.Thread(target=self._play_sequence_thread, args=(seq_name,), daemon=True)
+        thread.start()
+
+    def _play_sequence_thread(self, seq_name):
+        """Background thread for playing sequence"""
+        self.log(f"▶ Playing sequence: {seq_name}")
+
+        for step in self.sequences[seq_name]:
+            if 'angles' in step:
+                # Send multi-move command
+                angles = step['angles']
+                delay = step.get('delay', 1000)
+
+                try:
+                    command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
+                    self.serial_conn.write(command.encode())
+                    self.root.after(0, lambda a=angles: self.log(f"  → Sent: {a}"))
+                    time.sleep(delay / 1000.0)
+                except Exception as ex:
+                    error_msg = str(ex)
+                    self.root.after(0, lambda msg=error_msg: self.log(f"✗ Error: {msg}"))
+                    break
+
+        self.root.after(0, lambda: self.log("✓ Sequence complete"))
     
     def stop_sequence(self):
         """Stop sequence (placeholder)"""
@@ -1023,7 +1046,7 @@ class UnifiedControlSystem:
         if not self.current_cell:
             messagebox.showwarning("Warning", "Select a cell first")
             return
-        
+
         steps = []
         for i in range(self.steps_listbox.size()):
             item = self.steps_listbox.get(i)
@@ -1032,22 +1055,27 @@ class UnifiedControlSystem:
                 angles_str = item.split('. ')[1].strip('[]')
                 angles = [int(x.strip()) for x in angles_str.split(',')]
                 steps.append({'angles': angles, 'delay': 1000})
-            except:
-                pass
-        
+                self.log(f"  Step {i+1}: {angles}")
+            except Exception as e:
+                self.log(f"⚠ Could not parse step {i+1}: {e}")
+
+        if not steps:
+            messagebox.showwarning("Warning", "No steps in sequence!")
+            return
+
         self.sequences[self.current_cell] = steps
-        
+
         # Save to file
         with open(SEQUENCES_FILE, 'w') as f:
             json.dump(self.sequences, f, indent=2)
-        
+
         # Update cell list
         self.cell_listbox.delete(0, tk.END)
         for cell in CELL_NAMES:
             has_seq = "✓" if cell in self.sequences else ""
             self.cell_listbox.insert(tk.END, f"{cell} {has_seq}")
-        
-        self.log(f"Saved sequence to {self.current_cell} ({len(steps)} steps)")
+
+        self.log(f"✓ Saved sequence to {self.current_cell} ({len(steps)} steps)")
         messagebox.showinfo("Success", f"Sequence saved to {self.current_cell}!\n\n{len(steps)} steps")
     
     def load_rest_preset(self):
