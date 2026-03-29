@@ -545,94 +545,106 @@ class UnifiedControlSystem:
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             self.is_running = True
             self.log("Camera started")
-            # Start both previews
-            self.update_calib_preview()
-            self.update_auto_preview()
+            # Start both previews after a short delay to ensure UI is ready
+            self.root.after(500, self.start_previews)
         else:
             self.log("ERROR: No camera available!")
             messagebox.showerror("Camera Error", "Could not open any camera!\n\nMake sure:\n1. Camera is plugged in\n2. Not used by another program\n3. Try: ls -la /dev/video*")
 
+    def start_previews(self):
+        """Start both preview updates after UI is ready"""
+        self.update_calib_preview()
+        self.update_auto_preview()
+
     def update_calib_preview(self):
         """Update calibration tab preview - copied from simple_grid_calib"""
-        if not hasattr(self, 'cap') or self.cap is None or not self.cap.isOpened():
-            return
+        try:
+            if not hasattr(self, 'cap') or self.cap is None or not self.cap.isOpened():
+                return
 
-        ret, frame = self.cap.read()
-        if not ret:
-            if hasattr(self, 'calib_canvas'):
+            if not hasattr(self, 'calib_canvas') or self.calib_canvas is None:
+                # Canvas doesn't exist yet, try again later
+                if hasattr(self, 'calib_canvas'):
+                    self.calib_canvas.after(30, self.update_calib_preview)
+                return
+
+            ret, frame = self.cap.read()
+            if not ret:
                 self.calib_canvas.after(30, self.update_calib_preview)
-            return
+                return
 
-        self.original_height, self.original_width = frame.shape[:2]
+            self.original_height, self.original_width = frame.shape[:2]
 
-        # Get canvas size
-        canvas_width = self.calib_canvas.winfo_width()
-        canvas_height = self.calib_canvas.winfo_height()
+            # Get canvas size
+            canvas_width = self.calib_canvas.winfo_width()
+            canvas_height = self.calib_canvas.winfo_height()
 
-        if canvas_width < 2 or canvas_height < 2:
-            if hasattr(self, 'calib_canvas'):
+            if canvas_width < 2 or canvas_height < 2:
                 self.calib_canvas.after(30, self.update_calib_preview)
-            return
+                return
 
-        # Calculate scale (use MIN to fit, not MAX which crops)
-        scale = min(canvas_width / self.original_width,
-                   canvas_height / self.original_height)
+            # Calculate scale (use MIN to fit, not MAX which crops)
+            scale = min(canvas_width / self.original_width,
+                       canvas_height / self.original_height)
 
-        new_width = int(self.original_width * scale)
-        new_height = int(self.original_height * scale)
+            new_width = int(self.original_width * scale)
+            new_height = int(self.original_height * scale)
 
-        if new_width < 1 or new_height < 1:
-            if hasattr(self, 'calib_canvas'):
+            if new_width < 1 or new_height < 1:
                 self.calib_canvas.after(30, self.update_calib_preview)
-            return
+                return
 
-        # Resize
-        display_frame = cv2.resize(frame, (new_width, new_height))
+            # Resize
+            display_frame = cv2.resize(frame, (new_width, new_height))
 
-        # Create black background
-        bg = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+            # Create black background
+            bg = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
 
-        # Center image
-        y_offset = (canvas_height - new_height) // 2
-        x_offset = (canvas_width - new_width) // 2
+            # Center image
+            y_offset = (canvas_height - new_height) // 2
+            x_offset = (canvas_width - new_width) // 2
 
-        bg[y_offset:y_offset+new_height, x_offset:x_offset+new_width] = display_frame
+            bg[y_offset:y_offset+new_height, x_offset:x_offset+new_width] = display_frame
 
-        # Store for click calculation
-        self.calib_x_offset = x_offset
-        self.calib_y_offset = y_offset
-        self.calib_img_width = new_width
-        self.calib_img_height = new_height
+            # Store for click calculation
+            self.calib_x_offset = x_offset
+            self.calib_y_offset = y_offset
+            self.calib_img_width = new_width
+            self.calib_img_height = new_height
 
-        # Draw corners on background (not on camera frame)
-        corner_colors = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (0, 255, 255)]
-        corner_names = ['1: TL', '2: TR', '3: BL', '4: BR']
+            # Draw corners on background (not on camera frame)
+            corner_colors = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (0, 255, 255)]
+            corner_names = ['1: TL', '2: TR', '3: BL', '4: BR']
 
-        for i, (orig_x, orig_y) in enumerate(self.corners):
-            # Convert original click coordinates to display coordinates
-            disp_x = int(orig_x * (new_width / self.original_width)) + x_offset
-            disp_y = int(orig_y * (new_height / self.original_height)) + y_offset
+            for i, (orig_x, orig_y) in enumerate(self.corners):
+                # Convert original click coordinates to display coordinates
+                disp_x = int(orig_x * (new_width / self.original_width)) + x_offset
+                disp_y = int(orig_y * (new_height / self.original_height)) + y_offset
 
-            cv2.circle(bg, (disp_x, disp_y), 15, corner_colors[i], -1)
-            cv2.circle(bg, (disp_x, disp_y), 20, corner_colors[i], 2)
-            cv2.putText(bg, corner_names[i], (disp_x+20, disp_y-20),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, corner_colors[i], 2)
+                cv2.circle(bg, (disp_x, disp_y), 15, corner_colors[i], -1)
+                cv2.circle(bg, (disp_x, disp_y), 20, corner_colors[i], 2)
+                cv2.putText(bg, corner_names[i], (disp_x+20, disp_y-20),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, corner_colors[i], 2)
 
-        # Convert BGR to RGB
-        bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
+            # Convert BGR to RGB
+            bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
 
-        # Convert to PhotoImage
-        img = Image.fromarray(bg)
-        photo = ImageTk.PhotoImage(image=img)
+            # Convert to PhotoImage
+            img = Image.fromarray(bg)
+            photo = ImageTk.PhotoImage(image=img)
 
-        # Update canvas
-        self.calib_canvas.delete("all")
-        self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
-        self.calib_canvas.image = photo
+            # Update canvas
+            self.calib_canvas.delete("all")
+            self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
+            self.calib_canvas.image = photo
 
-        # Schedule next update
-        if hasattr(self, 'calib_canvas'):
+            # Schedule next update
             self.calib_canvas.after(30, self.update_calib_preview)
+        except Exception as e:
+            self.log(f"Calib preview error: {e}")
+            # Try again anyway
+            if hasattr(self, 'calib_canvas'):
+                self.calib_canvas.after(1000, self.update_calib_preview)
 
     def update_auto_preview(self):
         """Update auto detection tab preview - copied from simple_grid_calib"""
