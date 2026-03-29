@@ -903,6 +903,9 @@ class UnifiedControlSystem:
                     largest_obj = max(objects, key=lambda o: o['area'])
                     cell = self.find_cell(largest_obj['cx'], largest_obj['cy'])
 
+                    # Debug logging
+                    self.log(f"Detection: cell={cell}, has_sequence={cell in self.sequences if cell else False}, sequences={list(self.sequences.keys())}")
+
                     # Check if cell has a sequence and is A, B, or C (not D)
                     if cell and cell in self.sequences and cell[0] in ['A', 'B', 'C']:
                         self.current_detection_cell = cell
@@ -911,14 +914,22 @@ class UnifiedControlSystem:
                             text=f"📍 Object in {cell} - Ready to pickup!",
                             foreground='green'
                         )
+                        self.log(f"✓ Pickup button enabled for {cell}")
                     else:
                         self.current_detection_cell = None
                         self.pickup_btn.config(state='disabled')
                         if cell:
-                            self.detection_status_label.config(
-                                text=f"Object in {cell} (no sequence)",
-                                foreground='orange'
-                            )
+                            if cell[0] in ['A', 'B', 'C']:
+                                self.detection_status_label.config(
+                                    text=f"Object in {cell} (no sequence - create one first!)",
+                                    foreground='orange'
+                                )
+                                self.log(f"⚠ Cell {cell} has no sequence!")
+                            else:
+                                self.detection_status_label.config(
+                                    text=f"Object in {cell} (cell D not supported)",
+                                    foreground='orange'
+                                )
                         else:
                             self.detection_status_label.config(
                                 text="Object detected (outside grid)",
