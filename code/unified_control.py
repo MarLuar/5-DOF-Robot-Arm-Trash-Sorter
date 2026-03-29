@@ -417,6 +417,7 @@ class UnifiedControlSystem:
 
         ttk.Button(step_btn_frame, text="Add Current", command=self.add_current_step).pack(side=tk.LEFT, padx=2)
         ttk.Button(step_btn_frame, text="Add Rest", command=self.add_rest_step).pack(side=tk.LEFT, padx=2)
+        ttk.Button(step_btn_frame, text="Insert Step", command=self.insert_step).pack(side=tk.LEFT, padx=2)
         ttk.Button(step_btn_frame, text="Remove", command=self.remove_step).pack(side=tk.LEFT, padx=2)
         ttk.Button(step_btn_frame, text="Clear", command=self.clear_steps).pack(side=tk.LEFT, padx=2)
         
@@ -1592,6 +1593,67 @@ class UnifiedControlSystem:
         if not self.current_cell:
             return
         self.steps_listbox.insert(tk.END, f"{self.steps_listbox.size()+1}. {DEFAULT_REST}")
+
+    def insert_step(self):
+        """Insert step at selected position"""
+        if not self.current_cell:
+            messagebox.showwarning("Warning", "Select a cell first")
+            return
+
+        selection = self.steps_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Warning", "Select where to insert the step")
+            return
+
+        insert_pos = selection[0]
+
+        # Create insert dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Insert Step at Position {insert_pos + 1}")
+        dialog.geometry("400x300")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text=f"Insert Step at Position {insert_pos + 1}:",
+                 font=('Helvetica', 12, 'bold')).pack(pady=10)
+
+        # Create angle inputs
+        angle_vars = []
+        angles_frame = ttk.Frame(dialog)
+        angles_frame.pack(pady=10)
+
+        for i, name in enumerate(JOINT_NAMES):
+            frame = ttk.Frame(angles_frame)
+            frame.grid(row=i, column=0, padx=10, pady=5)
+
+            ttk.Label(frame, text=f"{name}:", width=10).pack(side=tk.LEFT)
+            var = tk.StringVar(value="0")
+            ttk.Entry(frame, textvariable=var, width=6, justify='center').pack(side=tk.LEFT)
+            angle_vars.append(var)
+
+        def do_insert():
+            try:
+                angles = [int(var.get()) for var in angle_vars]
+
+                # Validate
+                for i, angle in enumerate(angles):
+                    if angle < 0 or angle > 180:
+                        messagebox.showwarning("Warning", f"{JOINT_NAMES[i]} angle must be 0-180°")
+                        return
+
+                # Insert at selected position
+                self.steps_listbox.insert(insert_pos, f"{insert_pos + 1}. {angles}")
+
+                # Renumber all steps
+                self.renumber_steps()
+
+                self.log(f"Inserted step at {insert_pos + 1}: {angles}")
+                dialog.destroy()
+            except ValueError:
+                messagebox.showerror("Error", "All angles must be numbers")
+
+        ttk.Button(dialog, text="Insert", command=do_insert).pack(pady=10)
+        ttk.Button(dialog, text="Cancel", command=dialog.destroy).pack()
     
     def remove_step(self):
         """Remove selected step"""
