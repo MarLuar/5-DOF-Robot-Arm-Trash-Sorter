@@ -212,7 +212,8 @@ class UnifiedControlSystem:
         # Left: Camera preview
         left_frame = ttk.LabelFrame(self.calib_tab, text="Camera Preview - Click 4 Corners", padding="10")
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
+
+        # Fixed size canvas matching camera aspect ratio (4:3)
         self.calib_canvas = tk.Canvas(left_frame, bg='black', width=640, height=480)
         self.calib_canvas.pack(fill=tk.BOTH, expand=True)
         self.calib_canvas.bind('<Button-1>', self.on_calib_click)
@@ -558,10 +559,11 @@ class UnifiedControlSystem:
 
         ret, frame = self.cap.read()
         if ret:
-            # Draw corners
+            # Draw corners on frame
             for i, (x, y) in enumerate(self.corners):
                 color = [(0,0,255), (255,0,0), (0,255,0), (0,255,255)][i]
-                cv2.circle(frame, (x, y), 10, color, -1)
+                cv2.circle(frame, (int(x), int(y)), 10, color, -1)
+                cv2.circle(frame, (int(x), int(y)), 15, color, 2)
 
             # Convert BGR to RGB
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -570,13 +572,26 @@ class UnifiedControlSystem:
             canvas_width = self.calib_canvas.winfo_width()
             canvas_height = self.calib_canvas.winfo_height()
 
+            # Scale image to fill canvas completely (may crop slightly)
             if canvas_width > 1 and canvas_height > 1:
-                # Scale image to fit canvas
                 img_height, img_width = frame.shape[:2]
-                scale = min(canvas_width / img_width, canvas_height / img_height)
+
+                # Calculate scale to cover entire canvas (crop if needed)
+                scale_x = canvas_width / img_width
+                scale_y = canvas_height / img_height
+                scale = max(scale_x, scale_y)  # Use max to fill completely
+
                 new_width = int(img_width * scale)
                 new_height = int(img_height * scale)
                 frame = cv2.resize(frame, (new_width, new_height))
+
+                # Center crop if larger than canvas
+                if new_width > canvas_width:
+                    x_start = (new_width - canvas_width) // 2
+                    frame = frame[:, x_start:x_start+canvas_width]
+                if new_height > canvas_height:
+                    y_start = (new_height - canvas_height) // 2
+                    frame = frame[y_start:y_start+canvas_height]
 
             # Convert to PhotoImage
             img = Image.fromarray(frame)
@@ -616,13 +631,26 @@ class UnifiedControlSystem:
             canvas_width = self.auto_canvas.winfo_width()
             canvas_height = self.auto_canvas.winfo_height()
 
+            # Scale image to fill canvas completely (may crop slightly)
             if canvas_width > 1 and canvas_height > 1:
-                # Scale image to fit canvas
                 img_height, img_width = frame.shape[:2]
-                scale = min(canvas_width / img_width, canvas_height / img_height)
+
+                # Calculate scale to cover entire canvas (crop if needed)
+                scale_x = canvas_width / img_width
+                scale_y = canvas_height / img_height
+                scale = max(scale_x, scale_y)  # Use max to fill completely
+
                 new_width = int(img_width * scale)
                 new_height = int(img_height * scale)
                 frame = cv2.resize(frame, (new_width, new_height))
+
+                # Center crop if larger than canvas
+                if new_width > canvas_width:
+                    x_start = (new_width - canvas_width) // 2
+                    frame = frame[:, x_start:x_start+canvas_width]
+                if new_height > canvas_height:
+                    y_start = (new_height - canvas_height) // 2
+                    frame = frame[y_start:y_start+canvas_height]
 
             # Convert to PhotoImage
             img = Image.fromarray(frame)
