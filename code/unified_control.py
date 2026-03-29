@@ -378,6 +378,15 @@ class UnifiedControlSystem:
         
         ttk.Button(mid_frame, text="Save Sequence to Cell", command=self.save_current_sequence).pack(pady=5)
 
+        # Edit saved sequences
+        edit_frame = ttk.LabelFrame(mid_frame, text="Edit Saved Sequences", padding="5")
+        edit_frame.pack(fill=tk.X, pady=(10, 0))
+
+        ttk.Label(edit_frame, text="Select sequence from list, then:", font=('Helvetica', 8)).pack(anchor='w')
+        ttk.Button(edit_frame, text="Load to Editor", command=self.load_selected_sequence_to_editor).pack(fill=tk.X, pady=2)
+        ttk.Button(edit_frame, text="Delete Sequence", command=self.delete_selected_sequence).pack(fill=tk.X, pady=2)
+        ttk.Button(edit_frame, text="Duplicate to Another Cell", command=self.duplicate_sequence).pack(fill=tk.X, pady=2)
+
         # Legacy sequences info
         legacy_frame = ttk.LabelFrame(mid_frame, text="Legacy Sequences (Loaded)", padding="5")
         legacy_frame.pack(fill=tk.X, pady=(10, 0))
@@ -1151,17 +1160,132 @@ class UnifiedControlSystem:
         selection = self.cell_listbox.curselection()
         if not selection:
             return
-        
+
         cell = CELL_NAMES[selection[0]]
         self.current_cell = cell
         self.selected_cell_label.config(text=cell)
-        
+
         # Load steps
         self.steps_listbox.delete(0, tk.END)
         if cell in self.sequences:
             for i, step in enumerate(self.sequences[cell]):
                 angles = step.get('angles', [0,0,0,0,0])
                 self.steps_listbox.insert(tk.END, f"{i+1}. {angles}")
+
+            self.log(f"Loaded sequence for {cell} ({len(self.sequences[cell])} steps)")
+        else:
+            self.log(f"No sequence saved for {cell}")
+
+    def load_selected_sequence_to_editor(self):
+        """Load selected sequence from listbox into editor"""
+        selection = self.seq_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Warning", "Select a sequence first")
+            return
+
+        seq_name = self.seq_listbox.get(selection[0])
+        if seq_name not in self.sequences:
+            return
+
+        # Find which cell this sequence belongs to
+        for cell, seq in self.sequences.items():
+            if seq == self.sequences[seq_name]:
+                # Select that cell
+                cell_index = CELL_NAMES.index(cell)
+                self.cell_listbox.selection_clear(0, tk.END)
+                self.cell_listbox.selection_set(cell_index)
+                self.on_cell_select(None)
+                self.log(f"Loaded '{seq_name}' for editing")
+                return
+
+    def delete_selected_sequence(self):
+        """Delete selected sequence"""
+        selection = self.seq_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Warning", "Select a sequence first")
+            return
+
+        seq_name = self.seq_listbox.get(selection[0])
+
+        # Find and delete
+        for cell in list(self.sequences.keys()):
+            if self.sequences[cell] == self.sequences.get(seq_name):
+                if messagebox.askyesno("Confirm Delete", f"Delete sequence for cell {cell}?"):
+                    del self.sequences[cell]
+                    self.log(f"Deleted sequence for {cell}")
+
+                    # Save to file
+                    with open(SEQUENCES_FILE, 'w') as f:
+                        json.dump(self.sequences, f, indent=2)
+
+                    # Refresh cell list
+                    self.cell_listbox.delete(0, tk.END)
+                    for c in CELL_NAMES:
+                        has_seq = "✓" if c in self.sequences else ""
+                        self.cell_listbox.insert(tk.END, f"{c} {has_seq}")
+
+                    # Clear editor
+                    self.steps_listbox.delete(0, tk.END)
+                    self.selected_cell_label.config(text="None")
+                    self.current_cell = None
+                return
+
+    def duplicate_sequence(self):
+        """Duplicate selected sequence to another cell"""
+        selection = self.seq_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Warning", "Select a sequence first")
+            return
+
+        seq_name = self.seq_listbox.get(selection[0])
+
+        # Find source cell
+        source_cell = None
+        for cell, seq in self.sequences.items():
+            if seq == self.sequences.get(seq_name):
+                source_cell = cell
+                break
+
+        if not source_cell:
+            return
+
+        # Ask which cell to duplicate to
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Duplicate Sequence")
+        dialog.geometry("300x200")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text=f"Duplicate {source_cell} sequence to:", font=('Helvetica', 10, 'bold')).pack(pady=10)
+
+        target_var = tk.StringVar(value=CELL_NAMES[0])
+        target_combo = ttk.Combobox(dialog, textvariable=target_var, values=CELL_NAMES, state='readonly')
+        target_combo.pack(pady=5)
+
+        def do_duplicate():
+            target = target_var.get()
+            if target == source_cell:
+                messagebox.showwarning("Warning", "Select a different cell!")
+                return
+
+            self.sequences[target] = self.sequences[source_cell].copy()
+
+            # Save to file
+            with open(SEQUENCES_FILE, 'w') as f:
+                json.dump(self.sequences, f, indent=2)
+
+            self.log(f"Duplicated {source_cell} sequence to {target}")
+
+            # Refresh cell list
+            self.cell_listbox.delete(0, tk.END)
+            for c in CELL_NAMES:
+                has_seq = "✓" if c in self.sequences else ""
+                self.cell_listbox.insert(tk.END, f"{c} {has_seq}")
+
+            dialog.destroy()
+            messagebox.showinfo("Success", f"Sequence duplicated to {target}!")
+
+        ttk.Button(dialog, text="Duplicate", command=do_duplicate).pack(pady=10)
     
     def add_current_step(self):
         """Add current servo positions as step"""
