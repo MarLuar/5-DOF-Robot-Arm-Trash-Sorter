@@ -77,10 +77,7 @@ class UnifiedControlSystem:
         self.setup_ui()
         self.refresh_ports()
         self.load_calibration()
-        
-        # Start camera preview in auto tab
-        self.start_auto_preview()
-        
+
         # Start logging
         self.log("System initialized - v1.00.02")
     
