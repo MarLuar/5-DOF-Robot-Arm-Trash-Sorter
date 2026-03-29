@@ -531,7 +531,7 @@ class UnifiedControlSystem:
             self.update_calib_preview()
     
     def update_calib_preview(self):
-        """Update calibration preview"""
+        """Update calibration preview - scale to fit canvas and center"""
         try:
             if not self.cap or not self.cap.isOpened():
                 self.calib_canvas.after(30, self.update_calib_preview)
@@ -542,44 +542,91 @@ class UnifiedControlSystem:
                 self.calib_canvas.after(30, self.update_calib_preview)
                 return
 
-            # Draw clicked corners (always visible)
+            # Get canvas size
+            canvas_width = self.calib_canvas.winfo_width()
+            canvas_height = self.calib_canvas.winfo_height()
+
+            if canvas_width < 2 or canvas_height < 2:
+                self.calib_canvas.after(30, self.update_calib_preview)
+                return
+
+            # Get frame dimensions
+            frame_height, frame_width = frame.shape[:2]
+
+            # Calculate scale to fit canvas (maintain aspect ratio)
+            scale_x = canvas_width / frame_width
+            scale_y = canvas_height / frame_height
+            scale = min(scale_x, scale_y)
+
+            # Calculate new dimensions
+            new_width = int(frame_width * scale)
+            new_height = int(frame_height * scale)
+
+            # Resize frame
+            display_frame = cv2.resize(frame, (new_width, new_height))
+
+            # Create black background
+            bg = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+
+            # Center the image
+            x_offset = (canvas_width - new_width) // 2
+            y_offset = (canvas_height - new_height) // 2
+            bg[y_offset:y_offset+new_height, x_offset:x_offset+new_width] = display_frame
+
+            # Store scale and offset for marker drawing
+            self.calib_scale = scale
+            self.calib_x_offset = x_offset
+            self.calib_y_offset = y_offset
+
+            # Draw clicked corners (always visible) - scaled to display coordinates
             corner_colors = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (0, 255, 255)]
             corner_names = ['1:TL', '2:TR', '3:BL', '4:BR']
-            for i, (x, y) in enumerate(self.corners):
+            for i, (orig_x, orig_y) in enumerate(self.corners):
                 if i < 4:
-                    cv2.circle(frame, (x, y), 15, corner_colors[i], -1)
-                    cv2.circle(frame, (x, y), 20, corner_colors[i], 2)
-                    cv2.putText(frame, corner_names[i], (x+20, y-20),
+                    # Scale original click coordinates to display coordinates
+                    disp_x = int(orig_x * scale) + x_offset
+                    disp_y = int(orig_y * scale) + y_offset
+
+                    cv2.circle(bg, (disp_x, disp_y), 15, corner_colors[i], -1)
+                    cv2.circle(bg, (disp_x, disp_y), 20, corner_colors[i], 2)
+                    cv2.putText(bg, corner_names[i], (disp_x+20, disp_y-20),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, corner_colors[i], 2)
 
-            # If calibrated, draw grid overlay on every frame
+            # If calibrated, draw grid overlay on every frame - scaled
             if self.is_calibrated and len(self.all_points) >= 25:
-                # Draw grid lines
+                # Draw grid lines - scale all_points to display coordinates
                 for row in range(5):
                     idx1 = row * 5
                     idx2 = idx1 + 4
                     if idx2 < len(self.all_points):
-                        pt1 = self.all_points[idx1]
-                        pt2 = self.all_points[idx2]
-                        cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
+                        # Scale points to display coordinates
+                        pt1_x = int(self.all_points[idx1][0] * scale) + x_offset
+                        pt1_y = int(self.all_points[idx1][1] * scale) + y_offset
+                        pt2_x = int(self.all_points[idx2][0] * scale) + x_offset
+                        pt2_y = int(self.all_points[idx2][1] * scale) + y_offset
+                        cv2.line(bg, (pt1_x, pt1_y), (pt2_x, pt2_y), (0, 255, 0), 2)
 
                 for col in range(5):
                     idx1 = col
                     idx2 = col + 20
                     if idx2 < len(self.all_points):
-                        pt1 = self.all_points[idx1]
-                        pt2 = self.all_points[idx2]
-                        cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
+                        # Scale points to display coordinates
+                        pt1_x = int(self.all_points[idx1][0] * scale) + x_offset
+                        pt1_y = int(self.all_points[idx1][1] * scale) + y_offset
+                        pt2_x = int(self.all_points[idx2][0] * scale) + x_offset
+                        pt2_y = int(self.all_points[idx2][1] * scale) + y_offset
+                        cv2.line(bg, (pt1_x, pt1_y), (pt2_x, pt2_y), (0, 255, 0), 2)
 
-                # Draw calculated corner points
+                # Draw calculated corner points - scaled
                 for i in range(4):
                     if i < len(self.all_points):
-                        x, y = self.all_points[i]
-                        cv2.circle(frame, (x, y), 10, corner_colors[i], -1)
+                        disp_x = int(self.all_points[i][0] * scale) + x_offset
+                        disp_y = int(self.all_points[i][1] * scale) + y_offset
+                        cv2.circle(bg, (disp_x, disp_y), 10, corner_colors[i], -1)
 
             # Convert BGR to RGB
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(frame)
+            bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(bg)
             photo = ImageTk.PhotoImage(image=img)
 
             self.calib_canvas.delete("all")
@@ -592,16 +639,39 @@ class UnifiedControlSystem:
             self.calib_canvas.after(1000, self.update_calib_preview)
     
     def on_calib_click(self, event):
-        """Handle calibration click"""
+        """Handle calibration click - convert from display to original coordinates"""
         if len(self.corners) >= 4:
             return
-        
-        self.corners.append((event.x, event.y))
+
+        # Get click position (display coordinates)
+        click_x = event.x
+        click_y = event.y
+
+        # Convert from display coordinates back to original image coordinates
+        if hasattr(self, 'calib_scale') and self.calib_scale > 0:
+            # Remove offset
+            adj_x = click_x - self.calib_x_offset
+            adj_y = click_y - self.calib_y_offset
+
+            # Check if click is within image area
+            if adj_x < 0 or adj_y < 0:
+                return
+
+            # Scale back to original image coordinates
+            orig_x = int(adj_x / self.calib_scale)
+            orig_y = int(adj_y / self.calib_scale)
+
+            self.corners.append((orig_x, orig_y))
+            self.log(f"Corner {len(self.corners)}: ({orig_x}, {orig_y})")
+        else:
+            # Fallback if scale not set yet
+            self.corners.append((click_x, click_y))
+
         self.corner_label.config(text=f"Corners clicked: {len(self.corners)}/4")
-        
+
         if len(self.corners) >= 4:
             self.calc_btn.config(state='normal')
-            self.log(f"All 4 corners clicked")
+            self.log("All 4 corners clicked - ready to calculate grid")
     
     def reset_calibration(self):
         """Reset calibration"""
@@ -846,28 +916,80 @@ class UnifiedControlSystem:
             self.update_auto_preview()
     
     def update_auto_preview(self):
-        """Update auto detection preview"""
-        ret, frame = self.auto_cap.read()
-        if ret:
+        """Update auto detection preview - scale to fit canvas and center"""
+        try:
+            if not hasattr(self, 'auto_cap') or not self.auto_cap or not self.auto_cap.isOpened():
+                self.auto_canvas.after(30, self.update_auto_preview)
+                return
+
+            ret, frame = self.auto_cap.read()
+            if not ret:
+                self.auto_canvas.after(30, self.update_auto_preview)
+                return
+
+            # Get canvas size
+            canvas_width = self.auto_canvas.winfo_width()
+            canvas_height = self.auto_canvas.winfo_height()
+
+            if canvas_width < 2 or canvas_height < 2:
+                self.auto_canvas.after(30, self.update_auto_preview)
+                return
+
+            # Get frame dimensions
+            frame_height, frame_width = frame.shape[:2]
+
+            # Calculate scale to fit canvas (maintain aspect ratio)
+            scale_x = canvas_width / frame_width
+            scale_y = canvas_height / frame_height
+            scale = min(scale_x, scale_y)
+
+            # Calculate new dimensions
+            new_width = int(frame_width * scale)
+            new_height = int(frame_height * scale)
+
+            # Resize frame
+            display_frame = cv2.resize(frame, (new_width, new_height))
+
+            # Create black background
+            bg = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+
+            # Center the image
+            x_offset = (canvas_width - new_width) // 2
+            y_offset = (canvas_height - new_height) // 2
+            bg[y_offset:y_offset+new_height, x_offset:x_offset+new_width] = display_frame
+
+            # Store scale and offset for detection
+            self.auto_scale = scale
+            self.auto_x_offset = x_offset
+            self.auto_y_offset = y_offset
+
+            # If auto-detect enabled, draw detections - scaled
             if self.auto_detect_enabled and self.empty_grid is not None:
-                # Detect objects
                 objects = self.detect_objects(frame)
-                
-                # Draw detections
                 for obj in objects:
-                    x, y, w, h = obj['x'], obj['y'], obj['w'], obj['h']
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                    cv2.putText(frame, f"Cell: {obj.get('cell', '?')}", (x, y-10),
+                    # Scale detection coordinates to display coordinates
+                    disp_x = int(obj['x'] * scale) + x_offset
+                    disp_y = int(obj['y'] * scale) + y_offset
+                    disp_w = int(obj['w'] * scale)
+                    disp_h = int(obj['h'] * scale)
+
+                    cv2.rectangle(bg, (disp_x, disp_y), (disp_x+disp_w, disp_y+disp_h), (0, 255, 0), 2)
+                    cv2.putText(bg, f"Cell: {obj.get('cell', '?')}", (disp_x, disp_y-10),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(frame)
+
+            # Convert BGR to RGB
+            bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(bg)
             photo = ImageTk.PhotoImage(image=img)
-            
+
+            self.auto_canvas.delete("all")
             self.auto_canvas.create_image(0, 0, anchor='nw', image=photo)
             self.auto_canvas.image = photo
-        
-        self.auto_canvas.after(30, self.update_auto_preview)
+
+            self.auto_canvas.after(30, self.update_auto_preview)
+        except Exception as e:
+            self.log(f"Auto preview error: {e}")
+            self.auto_canvas.after(1000, self.update_auto_preview)
     
     def toggle_camera(self):
         """Toggle camera"""
