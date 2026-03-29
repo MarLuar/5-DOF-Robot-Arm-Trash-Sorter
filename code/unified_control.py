@@ -20,6 +20,7 @@ import threading
 import json
 import time
 import os
+import queue
 from datetime import datetime
 
 # Configuration
@@ -130,7 +131,12 @@ class UnifiedControlSystem:
         # Track detected objects for pickup
         self.detected_objects = []  # List of detected objects with cell info
         self.current_detection_cell = None  # Cell with detected object
-        
+
+        # Performance optimizations
+        self.serial_lock = threading.Lock()  # Thread-safe serial access
+        self.arduino_queue = queue.Queue()  # Command queue for Arduino
+        self.frame_count = 0  # For frame skipping
+
         # Setup UI
         self.setup_ui()
         self.refresh_ports()
@@ -142,6 +148,9 @@ class UnifiedControlSystem:
 
         # Load sequences (after UI is ready)
         self.load_sequences()
+
+        # Start Arduino worker thread
+        self.start_arduino_worker()
 
         # Auto-go to rest position after short delay (when connected)
         self.root.after(2000, self.auto_go_to_rest_on_startup)
@@ -432,28 +441,87 @@ class UnifiedControlSystem:
         ttk.Button(right_frame, text="Play Sequence", command=self.test_sequence).pack(fill=tk.X, pady=10)
     
     def setup_log_panel(self, parent):
-        """Setup shared log panel"""
+        """Setup shared log panel with floating window option"""
         log_frame = ttk.LabelFrame(parent, text="System Log", padding="5")
         log_frame.pack(fill=tk.X, padx=5, pady=5)
-        
+
         self.log_text = scrolledtext.ScrolledText(log_frame, height=6, width=120, state='disabled')
         self.log_text.pack(fill=tk.X)
+
+        # Button to open floating log window
+        btn_frame = ttk.Frame(log_frame)
+        btn_frame.pack(fill=tk.X, pady=(5, 0))
+
+        ttk.Button(btn_frame, text="🪟 Open Floating Log Window", command=self.open_floating_log).pack(side=tk.LEFT)
+
+        # Floating log window reference
+        self.floating_log_window = None
+
+    def open_floating_log(self):
+        """Open log in separate floating window"""
+        if self.floating_log_window and self.floating_log_window.winfo_exists():
+            # Already open, just bring to front
+            self.floating_log_window.lift()
+            self.floating_log_window.focus_force()
+            return
+
+        # Create floating window
+        self.floating_log_window = tk.Toplevel(self.root)
+        self.floating_log_window.title("📋 System Log - Floating")
+        self.floating_log_window.geometry("800x400+100+100")
+        self.floating_log_window.attributes('-topmost', False)  # Not always on top
+
+        # Create log text in floating window
+        floating_log_text = scrolledtext.ScrolledText(self.floating_log_window, height=20, width=100, state='disabled')
+        floating_log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Copy existing logs
+        current_logs = self.log_text.get('1.0', tk.END)
+        floating_log_text.config(state='normal')
+        floating_log_text.insert(tk.END, current_logs)
+        floating_log_text.config(state='disabled')
+        floating_log_text.see(tk.END)
+
+        # Mirror new logs to floating window
+        def mirror_log(message):
+            try:
+                if self.floating_log_window and self.floating_log_window.winfo_exists():
+                    floating_log_text.config(state='normal')
+                    floating_log_text.insert(tk.END, message + "\n")
+                    floating_log_text.see(tk.END)
+                    floating_log_text.config(state='disabled')
+            except:
+                pass
+
+        self.mirror_log_callback = mirror_log
+
+        # Handle window close
+        def on_close():
+            self.floating_log_window = None
+            self.mirror_log_callback = None
+            self.floating_log_window.destroy()
+
+        self.floating_log_window.protocol("WM_DELETE_WINDOW", on_close)
+        self.log("Floating log window opened")
     
     def log(self, message):
         """Add message to log"""
         try:
             timestamp = datetime.now().strftime("%H:%M:%S")
+            formatted_msg = f"[{timestamp}] {message}"
+
             if hasattr(self, 'log_text') and self.log_text:
                 self.log_text.config(state='normal')
-                self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+                self.log_text.insert(tk.END, formatted_msg + "\n")
                 self.log_text.see(tk.END)
                 self.log_text.config(state='disabled')
-            else:
-                # Fallback: print to console
-                print(f"[{timestamp}] {message}")
+
+            # Mirror to floating window if open
+            if hasattr(self, 'mirror_log_callback') and self.mirror_log_callback:
+                self.root.after(0, lambda msg=formatted_msg: self.mirror_log_callback(msg))
+
         except Exception as e:
-            # Final fallback
-            print(f"[ERROR] {message}")
+            print(f"[{timestamp}] Log error: {e}")
     
     # Manual Control Methods
     def refresh_ports(self):
@@ -630,13 +698,7 @@ class UnifiedControlSystem:
                 self.root.after(0, lambda a=angle: self.log(f"⚠ WARNING: Base {a}° is in danger zone (110-120°) - May malfunction!"))
 
             command = f"{idx} {angle}\n"
-
-            # Clear serial buffers before sending (prevents buffer overflow)
-            if self.serial_conn and self.serial_conn.is_open:
-                self.serial_conn.reset_input_buffer()
-                self.serial_conn.reset_output_buffer()
-                self.serial_conn.write(command.encode())
-                self.serial_conn.flush()  # Ensure command is sent
+            self.send_to_arduino(command)
 
             # Update UI from main thread
             self.root.after(0, lambda idx=idx, angle=angle: self.log(f"Sent: {JOINT_NAMES[idx]} -> {angle}°"))
@@ -665,14 +727,7 @@ class UnifiedControlSystem:
         """Background thread for sending multi-move command"""
         try:
             command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
-
-            # Clear serial buffers before sending (prevents buffer overflow)
-            if self.serial_conn and self.serial_conn.is_open:
-                self.serial_conn.reset_input_buffer()
-                self.serial_conn.reset_output_buffer()
-                self.serial_conn.write(command.encode())
-                self.serial_conn.flush()  # Ensure command is sent
-
+            self.send_to_arduino(command)
             # Update UI from main thread
             self.root.after(0, lambda a=angles: self.log(f"Sent multi-move: {a} (simultaneous)"))
         except Exception as ex:
@@ -693,7 +748,7 @@ class UnifiedControlSystem:
         try:
             speed = int(self.speed_var.get())
             command = f"99 {speed}\n"
-            self.serial_conn.write(command.encode())
+            self.send_to_arduino(command)
             # Update UI from main thread
             self.root.after(0, lambda s=speed: self.log(f"Speed set to {s}ms/deg"))
         except Exception as ex:
@@ -717,6 +772,36 @@ class UnifiedControlSystem:
         if self.is_connected:
             self.send_multi_move(pickup_angles)
         self.log("Moved to pickup position (simultaneous)")
+
+    def start_arduino_worker(self):
+        """Start Arduino command worker thread"""
+        def worker():
+            while True:
+                try:
+                    # Get command from queue (blocking)
+                    command = self.arduino_queue.get()
+                    if command is None:  # Shutdown signal
+                        break
+
+                    # Send with lock
+                    with self.serial_lock:
+                        if self.serial_conn and self.serial_conn.is_open:
+                            self.serial_conn.write(command.encode())
+                            self.serial_conn.flush()
+                            time.sleep(0.05)  # 50ms delay between commands
+                except Exception as e:
+                    self.log(f"Arduino worker error: {e}")
+
+        self.arduino_worker_thread = threading.Thread(target=worker, daemon=True)
+        self.arduino_worker_thread.start()
+        self.log("Arduino worker thread started")
+
+    def send_to_arduino(self, command):
+        """Send command to Arduino via queue (thread-safe)"""
+        if self.is_connected:
+            self.arduino_queue.put(command)
+        else:
+            self.log(f"⚠ Not connected, command queued: {command.strip()}")
 
     def refresh_seq_list(self):
         """Refresh sequence listbox"""
@@ -892,8 +977,13 @@ class UnifiedControlSystem:
                         cv2.circle(bg, (disp_x, disp_y), 10, corner_colors[i], -1)
 
             # Object detection - draw detected objects (if enabled and empty grid is available)
+            # Only detect every 5th frame (2 FPS instead of 10 FPS) to reduce CPU
+            self.frame_count += 1
             if self.detect_in_calib_var.get() and hasattr(self, 'empty_grid') and self.empty_grid is not None:
-                objects = self.detect_objects(frame)
+                if self.frame_count % 5 == 0:  # Detect every 5th frame
+                    objects = self.detect_objects(frame)
+                else:
+                    objects = []
 
                 # Track detected objects and enable pickup button
                 self.detected_objects = objects
@@ -967,7 +1057,7 @@ class UnifiedControlSystem:
             self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
             self.calib_canvas.image = photo
 
-            self.calib_canvas.after(30, self.update_calib_preview)
+            self.calib_canvas.after(100, self.update_calib_preview)  # 10 FPS instead of 30 FPS
         except Exception as e:
             self.log(f"Preview error: {e}")
             self.calib_canvas.after(1000, self.update_calib_preview)
