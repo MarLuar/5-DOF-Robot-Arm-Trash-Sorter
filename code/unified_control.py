@@ -1783,31 +1783,47 @@ class UnifiedControlSystem:
     
     def find_cell(self, x, y):
         """Find which cell contains point (x, y)"""
-        if not self.is_calibrated or len(self.all_points) < 25:
-            return "?"
-        
-        # Simple bounding box check
-        for row in range(4):
-            for col in range(4):
-                idx1 = row * 5 + col
-                idx2 = idx1 + 1
-                idx3 = idx1 + 5
-                idx4 = idx3 + 1
-                
-                if idx4 < len(self.all_points):
-                    x1, y1 = self.all_points[idx1]
-                    x2, y2 = self.all_points[idx2]
-                    x3, y3 = self.all_points[idx3]
-                    x4, y4 = self.all_points[idx4]
-                    
-                    min_x = min(x1, x2, x3, x4)
-                    max_x = max(x1, x2, x3, x4)
-                    min_y = min(y1, y2, y3, y4)
-                    max_y = max(y1, y2, y3, y4)
-                    
-                    if min_x <= x <= max_x and min_y <= y <= max_y:
-                        return f"{chr(ord('A')+row)}{col+1}"
-        
+        # First try calibrated grid points
+        if self.is_calibrated and len(self.all_points) >= 25:
+            for row in range(4):
+                for col in range(4):
+                    idx1 = row * 5 + col
+                    idx2 = idx1 + 1
+                    idx3 = idx1 + 5
+                    idx4 = idx3 + 1
+
+                    if idx4 < len(self.all_points):
+                        x1, y1 = self.all_points[idx1]
+                        x2, y2 = self.all_points[idx2]
+                        x3, y3 = self.all_points[idx3]
+                        x4, y4 = self.all_points[idx4]
+
+                        min_x = min(x1, x2, x3, x4)
+                        max_x = max(x1, x2, x3, x4)
+                        min_y = min(y1, y2, y3, y4)
+                        max_y = max(y1, y2, y3, y4)
+
+                        if min_x <= x <= max_x and min_y <= y <= max_y:
+                            return f"{chr(ord('A')+row)}{col+1}"
+
+        # Fallback: Simple grid division (if calibration not available)
+        # Assumes camera view is roughly aligned with grid
+        if hasattr(self, 'empty_grid') and self.empty_grid is not None:
+            h, w = self.empty_grid.shape[:2]
+
+            # Divide into 4x4 grid
+            cell_w = w / 4
+            cell_h = h / 4
+
+            col = int(x / cell_w)
+            row = int(y / cell_h)
+
+            if 0 <= row < 4 and 0 <= col < 4:
+                cell = f"{chr(ord('A')+row)}{col+1}"
+                self.log(f"find_cell fallback: ({x},{y}) -> {cell} (grid: {w}x{h})")
+                return cell
+
+        self.log(f"find_cell: ({x},{y}) -> ? (calibrated={self.is_calibrated}, points={len(self.all_points) if hasattr(self, 'all_points') else 0})")
         return "?"
     
     def load_calibration(self):
