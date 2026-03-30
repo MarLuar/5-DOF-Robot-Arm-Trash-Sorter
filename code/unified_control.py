@@ -158,6 +158,7 @@ class UnifiedControlSystem:
         self.refresh_ports()
         self.load_calibration()
         self.load_presets()  # Load user-modified presets
+        self.load_camera_setting()  # Auto-load saved camera setting
 
         # Start logging
         self.log("System initialized - v1.00.02")
@@ -188,11 +189,11 @@ class UnifiedControlSystem:
         ttk.Label(top_bar, text="5-DOF Robotic Arm - Unified Control System v1.00.02",
                  font=('Helvetica', 12, 'bold')).pack(side=tk.LEFT)
 
-        ttk.Button(top_bar, text="🪟 Open Floating Log Window",
+        ttk.Button(top_bar, text="Open Floating Log Window",
                   command=self.open_floating_log).pack(side=tk.RIGHT, padx=5)
 
         # Analysis mode button (for debugging)
-        ttk.Button(top_bar, text="🔍 Log Event",
+        ttk.Button(top_bar, text="Log Event",
                   command=self.log_user_event).pack(side=tk.RIGHT, padx=5)
 
         # Create notebook for tabs
@@ -238,7 +239,7 @@ class UnifiedControlSystem:
 
             # Add warning for base servo
             if i == 0:  # Base
-                ttk.Label(frame, text="(⚠ 110-120° risky)", foreground='orange', font=('Helvetica', 8)).pack(side=tk.LEFT, padx=3)
+                ttk.Label(frame, text="(110-120° risky)", foreground='orange', font=('Helvetica', 8)).pack(side=tk.LEFT, padx=3)
 
             btn_frame = ttk.Frame(frame)
             btn_frame.pack(side=tk.LEFT)
@@ -259,7 +260,7 @@ class UnifiedControlSystem:
 
         ttk.Button(preset_frame, text="Rest Position", command=self.go_to_rest).pack(side=tk.LEFT, padx=5)
         ttk.Button(preset_frame, text="Pickup Position", command=self.go_to_pickup).pack(side=tk.LEFT, padx=5)
-        ttk.Button(preset_frame, text="📤 Send All (Simultaneous)", command=self.send_all_servos).pack(side=tk.LEFT, padx=5)
+        ttk.Button(preset_frame, text="Send All (Simultaneous)", command=self.send_all_servos).pack(side=tk.LEFT, padx=5)
         
         # Right: Connection, Presets & Speed
         right_frame = ttk.Frame(self.manual_tab)
@@ -283,7 +284,7 @@ class UnifiedControlSystem:
         self.refresh_btn = ttk.Button(port_frame, text="Refresh", command=self.refresh_ports)
         self.refresh_btn.pack(side=tk.LEFT, padx=5)
 
-        self.recover_btn = ttk.Button(port_frame, text="🔄 Recover", command=self.recover_connection)
+        self.recover_btn = ttk.Button(port_frame, text="Recover", command=self.recover_connection)
         self.recover_btn.pack(side=tk.LEFT, padx=5)
 
         self.status_label = ttk.Label(conn_frame, text="Status: Disconnected", foreground='red')
@@ -300,8 +301,8 @@ class UnifiedControlSystem:
 
         # Copy/Paste angles
         ttk.Label(preset_frame, text="Current Angles:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
-        ttk.Button(preset_frame, text="📋 Copy Current Angles", command=self.copy_current_angles).pack(fill=tk.X, pady=2)
-        ttk.Button(preset_frame, text="📌 Paste to Manual Control", command=self.paste_to_manual).pack(fill=tk.X, pady=2)
+        ttk.Button(preset_frame, text="Copy Current Angles", command=self.copy_current_angles).pack(fill=tk.X, pady=2)
+        ttk.Button(preset_frame, text="Paste to Manual Control", command=self.paste_to_manual).pack(fill=tk.X, pady=2)
 
         # Speed
         speed_frame = ttk.LabelFrame(right_frame, text="Movement Speed", padding="5")
@@ -322,6 +323,34 @@ class UnifiedControlSystem:
 
         ttk.Button(seq_frame, text="Play Selected", command=self.play_sequence).pack(pady=2)
         ttk.Button(seq_frame, text="Stop", command=self.stop_sequence).pack(pady=2)
+
+        # Camera Configuration
+        cam_frame = ttk.LabelFrame(right_frame, text="ZStar Camera Settings", padding="5")
+        cam_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(cam_frame, text="Camera Device:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
+
+        cam_dev_frame = ttk.Frame(cam_frame)
+        cam_dev_frame.pack(fill=tk.X, pady=5)
+
+        self.camera_index_var = tk.StringVar(value="3")
+        self.camera_combo = ttk.Combobox(cam_dev_frame, textvariable=self.camera_index_var, width=12, values=["0", "1", "2", "3", "4", "5", "6", "7"])
+        self.camera_combo.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(cam_dev_frame, text="Find", command=self.find_cameras).pack(side=tk.LEFT, padx=2)
+        ttk.Button(cam_dev_frame, text="Test", command=self.test_camera).pack(side=tk.LEFT, padx=2)
+
+        ttk.Separator(cam_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+
+        ttk.Button(cam_frame, text="Save Camera Setting", command=self.save_camera_setting).pack(fill=tk.X, pady=2)
+        ttk.Button(cam_frame, text="Load Saved Setting", command=self.load_camera_setting).pack(fill=tk.X, pady=2)
+
+        ttk.Separator(cam_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+
+        ttk.Button(cam_frame, text="Set Camera for Calibration", command=self.set_camera_for_calibration, style='Accent.TButton').pack(fill=tk.X, pady=2)
+
+        self.camera_status_label = ttk.Label(cam_frame, text="Status: Not configured", foreground='gray', font=('Helvetica', 8))
+        self.camera_status_label.pack(pady=5)
     
     def setup_calibration_tab(self):
         """Setup calibration tab"""
@@ -352,7 +381,7 @@ class UnifiedControlSystem:
                        command=self.toggle_detection_in_calib).pack(side=tk.LEFT, padx=10)
 
         # Pickup button (initially disabled)
-        self.pickup_btn = ttk.Button(btn_frame, text="🤖 PICKUP OBJECT", command=self.pickup_detected_object, state='disabled')
+        self.pickup_btn = ttk.Button(btn_frame, text="PICKUP OBJECT", command=self.pickup_detected_object, state='disabled')
         self.pickup_btn.pack(side=tk.LEFT, padx=10)
 
         # Detection status label
@@ -387,7 +416,7 @@ class UnifiedControlSystem:
    - Yellow boxes show detections
    - Check System Log for coordinates
 
-5. Click "🤖 PICKUP OBJECT"
+5. Click "PICKUP OBJECT"
    - Executes sequence for that cell
    - Automatically picks up object
    - Status shows pickup progress
@@ -428,7 +457,7 @@ class UnifiedControlSystem:
         self.cell_listbox.bind('<<ListboxSelect>>', self.on_cell_select)
         
         for cell in CELL_NAMES:
-            has_seq = "✓" if cell in self.sequences else ""
+            has_seq = "[OK]" if cell in self.sequences else ""
             self.cell_listbox.insert(tk.END, f"{cell} {has_seq}")
         
         # Middle: Sequence editor
@@ -467,6 +496,11 @@ class UnifiedControlSystem:
         ttk.Button(edit_frame, text="Delete Sequence", command=self.delete_selected_sequence).pack(fill=tk.X, pady=2)
         ttk.Button(edit_frame, text="Duplicate to Another Cell", command=self.duplicate_sequence).pack(fill=tk.X, pady=2)
 
+        ttk.Separator(edit_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+
+        ttk.Label(edit_frame, text="Clipboard:", font=('Helvetica', 8)).pack(anchor='w')
+        ttk.Button(edit_frame, text="Paste Step to Editor", command=self.paste_step_to_editor).pack(fill=tk.X, pady=2)
+
         # Legacy sequences info
         legacy_frame = ttk.LabelFrame(mid_frame, text="Legacy Sequences (Loaded)", padding="5")
         legacy_frame.pack(fill=tk.X, pady=(10, 0))
@@ -497,7 +531,7 @@ class UnifiedControlSystem:
         log_frame.pack(fill=tk.X, padx=5, pady=5)
 
         # Detection status display at top (static)
-        self.detection_display_label = ttk.Label(log_frame, text="📍 Detection Status: No object detected",
+        self.detection_display_label = ttk.Label(log_frame, text="Detection Status: No object detected",
                                                   font=('Helvetica', 10, 'bold'), foreground='gray',
                                                   relief=tk.SUNKEN, padding=5)
         self.detection_display_label.pack(fill=tk.X, pady=(0, 5))
@@ -512,12 +546,12 @@ class UnifiedControlSystem:
         """Update the static detection status display"""
         if cell and cell != '?':
             self.detection_display_label.config(
-                text=f"📍 Detection Status: Object in {cell}",
+                text=f"Detection Status: Object in {cell}",
                 foreground='green'
             )
         else:
             self.detection_display_label.config(
-                text="📍 Detection Status: No object detected",
+                text="Detection Status: No object detected",
                 foreground='gray'
             )
 
@@ -535,13 +569,13 @@ class UnifiedControlSystem:
 
         # Create floating window
         self.floating_log_window = tk.Toplevel(self.root)
-        self.floating_log_window.title("📋 System Log - Floating")
+        self.floating_log_window.title("System Log - Floating")
         self.floating_log_window.geometry("800x400+100+100")
         self.floating_log_window.attributes('-topmost', False)  # Not always on top
 
         # Detection status display in floating window
         floating_detection_label = ttk.Label(self.floating_log_window,
-                                              text="📍 Detection Status: No object detected",
+                                              text="Detection Status: No object detected",
                                               font=('Helvetica', 10, 'bold'), foreground='gray',
                                               relief=tk.SUNKEN, padding=5)
         floating_detection_label.pack(fill=tk.X, padx=5, pady=5)
@@ -574,12 +608,12 @@ class UnifiedControlSystem:
                 if self.floating_log_window and self.floating_log_window.winfo_exists():
                     if cell and cell != '?':
                         floating_detection_label.config(
-                            text=f"📍 Detection Status: Object in {cell}",
+                            text=f"Detection Status: Object in {cell}",
                             foreground='green'
                         )
                     else:
                         floating_detection_label.config(
-                            text="📍 Detection Status: No object detected",
+                            text="Detection Status: No object detected",
                             foreground='gray'
                         )
             except:
@@ -602,7 +636,7 @@ class UnifiedControlSystem:
         """Log a user event for analysis"""
         # Create event log dialog
         dialog = tk.Toplevel(self.root)
-        dialog.title("🔍 Log User Event")
+        dialog.title("Log User Event")
         dialog.geometry("400x200")
         dialog.transient(self.root)
         dialog.grab_set()
@@ -624,7 +658,7 @@ class UnifiedControlSystem:
 
         def log_it():
             event = event_var.get()
-            self.log(f"🔍 USER EVENT: {event}")
+            self.log(f"USER EVENT: {event}")
             dialog.destroy()
 
         ttk.Button(dialog, text="Log Event", command=log_it).pack(pady=10)
@@ -663,7 +697,260 @@ class UnifiedControlSystem:
                     self.log(f"Found: {p.device}")
                     return
             self.port_combo.current(0)
-    
+
+    def find_cameras(self):
+        """Find all available camera devices"""
+        self.log("Scanning for cameras...")
+        available_cameras = []
+        camera_details = []
+
+        for i in range(8):
+            try:
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        fps_str = f"{fps:.1f}fps" if fps > 0 else "unknown fps"
+                        available_cameras.append(i)
+                        camera_details.append(f"• /dev/video{i}: {width}x{height} @ {fps_str}")
+                        self.log(f"Camera found: /dev/video{i} - {width}x{height} @ {fps_str}")
+                    cap.release()
+                else:
+                    cap.release()
+            except Exception as e:
+                self.log(f"Error checking /dev/video{i}: {e}")
+
+        if available_cameras:
+            self.camera_status_label.config(
+                text=f"Found: {len(available_cameras)} camera(s)",
+                foreground='green'
+            )
+
+            # Auto-select Z-Star (usually video3 or video4)
+            zstar_found = False
+            for i in available_cameras:
+                if i in [3, 4]:
+                    self.camera_combo.set(str(i))
+                    self.log(f"ZStar camera detected at index {i}")
+                    zstar_found = True
+                    break
+
+            # If no video3/4, select first available
+            if not zstar_found and available_cameras:
+                self.camera_combo.set(str(available_cameras[0]))
+
+            # Show popup with camera list
+            camera_list = "\n".join(camera_details)
+            messagebox.showinfo(
+                "Cameras Found",
+                f"Found {len(available_cameras)} camera(s):\n\n"
+                f"{camera_list}\n\n"
+                f"Selected: /dev/video{self.camera_combo.get()}\n\n"
+                f"Tip: ZStar camera is usually /dev/video3 or /dev/video4"
+            )
+        else:
+            self.camera_status_label.config(
+                text="No cameras found",
+                foreground='red'
+            )
+            messagebox.showwarning(
+                "No Cameras Found",
+                "No camera devices were detected.\n\n"
+                "Please check:\n"
+                "1. Camera is properly connected\n"
+                "2. Try a different USB port\n"
+                "3. Check dmesg for device info"
+            )
+
+        self.log(f"Scan complete: {len(available_cameras)} camera(s) found")
+
+    def test_camera(self):
+        """Test the selected camera index"""
+        try:
+            index = int(self.camera_index_var.get())
+            self.log(f"Testing camera at index {index}...")
+
+            cap = cv2.VideoCapture(index)
+
+            if not cap.isOpened():
+                self.camera_status_label.config(
+                    text=f"Failed to open /dev/video{index}",
+                    foreground='red'
+                )
+                messagebox.showerror(
+                    "Camera Test Failed",
+                    f"Could not open camera at /dev/video{index}\n\n"
+                    "Please try a different index or check camera connection."
+                )
+                cap.release()
+                return
+
+            # Try to get a frame
+            ret, frame = cap.read()
+            if not ret:
+                self.camera_status_label.config(
+                    text=f"Failed to capture frame",
+                    foreground='red'
+                )
+                messagebox.showerror(
+                    "Camera Test Failed",
+                    f"Camera opened but failed to capture frames.\n\n"
+                    "The camera may be in use by another application\n"
+                    "or there may be a driver issue."
+                )
+                cap.release()
+                return
+
+            # Get camera properties
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+
+            cap.release()
+
+            self.camera_status_label.config(
+                text=f"Camera OK: {width}x{height} @ {fps:.1f}fps",
+                foreground='green'
+            )
+
+            self.log(f"Camera test successful: /dev/video{index} - {width}x{height} @ {fps:.1f}fps")
+
+            messagebox.showinfo(
+                "Camera Test Successful",
+                f"Camera at /dev/video{index} is working!\n\n"
+                f"Resolution: {width}x{height}\n"
+                f"FPS: {fps:.1f}\n\n"
+                f"Click 'Save Camera Setting' to use this camera."
+            )
+
+        except ValueError:
+            messagebox.showerror("Invalid Index", "Please enter a valid camera index (0-7)")
+            self.log("Invalid camera index entered")
+        except Exception as e:
+            self.camera_status_label.config(
+                text=f"Error: {str(e)}",
+                foreground='red'
+            )
+            self.log(f"Camera test error: {e}")
+
+    def save_camera_setting(self):
+        """Save camera index to configuration file"""
+        try:
+            index = self.camera_index_var.get()
+            config = {
+                'camera_index': int(index),
+                'timestamp': datetime.now().isoformat()
+            }
+
+            config_file = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/camera_config.json'
+            with open(config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+
+            self.camera_status_label.config(
+                text=f"Saved: /dev/video{index}",
+                foreground='green'
+            )
+            self.log(f"Camera setting saved: /dev/video{index}")
+            messagebox.showinfo(
+                "Setting Saved",
+                f"Camera configuration saved!\n\n"
+                f"Device: /dev/video{index}\n"
+                f"File: camera_config.json\n\n"
+                f"The camera will use this setting next time."
+            )
+
+        except Exception as e:
+            self.log(f"Error saving camera config: {e}")
+            messagebox.showerror("Save Error", f"Could not save camera setting:\n{e}")
+
+    def load_camera_setting(self):
+        """Load camera index from configuration file"""
+        try:
+            config_file = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/camera_config.json'
+
+            if not os.path.exists(config_file):
+                self.camera_status_label.config(
+                    text="No saved config found",
+                    foreground='orange'
+                )
+                messagebox.showinfo(
+                    "No Saved Config",
+                    "No camera configuration file found.\n\n"
+                    "Use 'Find' to detect cameras,\n"
+                    "then 'Save Camera Setting' to save."
+                )
+                return
+
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+
+            index = config.get('camera_index', 3)
+            self.camera_index_var.set(str(index))
+            self.camera_status_label.config(
+                text=f"Loaded: /dev/video{index}",
+                foreground='green'
+            )
+            self.log(f"Camera setting loaded: /dev/video{index}")
+
+        except Exception as e:
+            self.log(f"Error loading camera config: {e}")
+            messagebox.showerror("Load Error", f"Could not load camera setting:\n{e}")
+
+    def set_camera_for_calibration(self):
+        """Set the selected camera and restart calibration preview"""
+        try:
+            index = int(self.camera_index_var.get())
+            self.log(f"Setting camera for calibration: /dev/video{index}")
+
+            # Confirm with user
+            confirm = messagebox.askyesno(
+                "Set Camera",
+                f"Use /dev/video{index} for grid calibration?\n\n"
+                f"This will restart the camera preview.\n\n"
+                f"Make sure this is the correct camera for your ZStar."
+            )
+
+            if not confirm:
+                return
+
+            # Save the setting
+            config = {
+                'camera_index': index,
+                'timestamp': datetime.now().isoformat()
+            }
+            config_file = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/camera_config.json'
+            with open(config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+
+            # Restart calibration preview with new camera
+            self.camera_status_label.config(
+                text=f"Using /dev/video{index}",
+                foreground='green'
+            )
+            self.log(f"Restarting calibration preview with /dev/video{index}...")
+
+            # Switch to calibration tab and restart preview
+            self.notebook.select(1)  # Select calibration tab
+            self.start_calib_preview()
+
+            messagebox.showinfo(
+                "Camera Set",
+                f"Camera set to /dev/video{index}\n\n"
+                f"Calibration preview restarted.\n"
+                f"Check the camera preview to verify."
+            )
+
+        except ValueError:
+            messagebox.showerror("Invalid Index", "Please select a valid camera index (0-7)")
+            self.log("Invalid camera index for calibration")
+        except Exception as e:
+            self.log(f"Error setting camera: {e}")
+            messagebox.showerror("Error", f"Could not set camera:\n{e}")
+
+
     def toggle_connection(self):
         """Toggle serial connection"""
         if self.is_connected:
@@ -706,7 +993,7 @@ class UnifiedControlSystem:
         self.is_connected = True
         self.connect_btn.config(text="Disconnect")
         self.status_label.config(text="Status: Connected", foreground='green')
-        self.log(f"✓ Connected to {port}")
+        self.log(f"Connected to {port}")
 
         # ALWAYS go to rest position when (re)connected - prevents struggling
         self.log("Moving to rest position (prevents struggling)...")
@@ -721,7 +1008,7 @@ class UnifiedControlSystem:
             try:
                 # Check if port is still open
                 if not self.serial_conn.is_open:
-                    self.log("⚠ Serial port closed! Attempting recovery...")
+                    self.log("Serial port closed! Attempting recovery...")
                     self.disconnect()
                     self.root.after(1000, self.connect)
                     return
@@ -730,7 +1017,7 @@ class UnifiedControlSystem:
                 # For now, just schedule next check
                 self.root.after(5000, self._monitor_communication)
             except Exception as e:
-                self.log(f"⚠ Communication error detected: {e}")
+                self.log(f"Communication error detected: {e}")
                 self.log("Attempting to reconnect...")
                 self.disconnect()
                 self.root.after(1000, self.connect)
@@ -752,7 +1039,7 @@ class UnifiedControlSystem:
 
     def recover_connection(self):
         """Manual recovery - disconnect and reconnect"""
-        self.log("🔄 Recovery initiated...")
+        self.log("Recovery initiated...")
         if self.is_connected:
             self.disconnect()
         self.root.after(1000, self.connect)
@@ -770,7 +1057,7 @@ class UnifiedControlSystem:
                 test_conn = serial.Serial(port, BAUD_RATE, timeout=0.1)
                 test_conn.close()
                 # Arduino is back! Trigger reconnection
-                self.log("🔌 Arduino reconnected! Going to rest position...")
+                self.log("Arduino reconnected! Going to rest position...")
                 self.connect()
                 return
             except:
@@ -788,7 +1075,7 @@ class UnifiedControlSystem:
             # Warn if trying to move base beyond safe limits
             if idx == 0:  # Base servo
                 if new_val < 10 or new_val > 170:
-                    self.log(f"⚠ Warning: Base at {new_val}° (safe range: 10-170°)")
+                    self.log(f"Warning: Base at {new_val}° (safe range: 10-170°)")
 
                 # CRITICAL: Warn about 110-120° dead zone
                 if BASE_WARNING_MIN <= new_val <= BASE_WARNING_MAX:
@@ -815,12 +1102,12 @@ class UnifiedControlSystem:
 
             # Validate angle
             if angle < MIN_ANGLE or angle > MAX_ANGLE:
-                self.root.after(0, lambda: self.log(f"⚠ Invalid angle {angle}° for {JOINT_NAMES[idx]} (must be {MIN_ANGLE}-{MAX_ANGLE})"))
+                self.root.after(0, lambda: self.log(f"Invalid angle {angle}° for {JOINT_NAMES[idx]} (must be {MIN_ANGLE}-{MAX_ANGLE})"))
                 return
 
             # Warn about base servo dead zone (but don't block)
             if idx == 0 and BASE_WARNING_MIN <= angle <= BASE_WARNING_MAX:
-                self.root.after(0, lambda a=angle: self.log(f"⚠ WARNING: Base {a}° is in danger zone (110-120°) - May malfunction!"))
+                self.root.after(0, lambda a=angle: self.log(f"WARNING: Base {a}° is in danger zone (110-120°) - May malfunction!"))
 
             command = f"{idx} {angle}\n"
             self.send_to_arduino(command)
@@ -828,7 +1115,7 @@ class UnifiedControlSystem:
             # Update UI from main thread
             self.root.after(0, lambda idx=idx, angle=angle: self.log(f"Sent: {JOINT_NAMES[idx]} -> {angle}°"))
         except ValueError:
-            self.root.after(0, lambda: self.log(f"⚠ Invalid angle value"))
+            self.root.after(0, lambda: self.log(f"Invalid angle value"))
         except Exception as ex:
             error_msg = str(ex)
             self.root.after(0, lambda msg=error_msg: self.log(f"Error: {msg}"))
@@ -841,7 +1128,7 @@ class UnifiedControlSystem:
         # Validate all angles first
         for i, angle in enumerate(angles):
             if angle < MIN_ANGLE or angle > MAX_ANGLE:
-                self.log(f"⚠ Invalid angle {angle}° for {JOINT_NAMES[i]} (must be {MIN_ANGLE}-{MAX_ANGLE})")
+                self.log(f"Invalid angle {angle}° for {JOINT_NAMES[i]} (must be {MIN_ANGLE}-{MAX_ANGLE})")
                 return
 
         # Send in background thread to prevent UI hang
@@ -914,9 +1201,9 @@ class UnifiedControlSystem:
                     return
 
             # Send as multi-move for simultaneous movement
-            self.log(f"⏱️ Sending all servos at {time.time():.3f}")
+            self.log(f"[Timer]️ Sending all servos at {time.time():.3f}")
             self.send_multi_move(angles)
-            self.log(f"📤 Sent all servos simultaneously: {angles}")
+            self.log(f"Sent all servos simultaneously: {angles}")
         except ValueError:
             messagebox.showerror("Error", "All angles must be valid numbers")
 
@@ -924,7 +1211,7 @@ class UnifiedControlSystem:
         """Copy current manual control angles to clipboard"""
         angles = [int(self.input_boxes[i].get()) for i in range(5)]
         self.step_clipboard = [angles]
-        self.log(f"📋 Copied current angles: {angles}")
+        self.log(f"Copied current angles: {angles}")
         messagebox.showinfo("Copied!", f"Current angles copied to clipboard:\n{angles}\n\nYou can now paste these angles into sequence steps")
 
     def paste_to_manual(self):
@@ -940,7 +1227,7 @@ class UnifiedControlSystem:
         for i in range(5):
             self.input_boxes[i].set(str(angles[i]))
 
-        self.log(f"📌 Pasted to Manual Control: {angles}")
+        self.log(f"Pasted to Manual Control: {angles}")
         messagebox.showinfo("Pasted!", f"Angles pasted to Manual Control:\n{angles}\n\nClick 'Send' on any servo to move to this position")
 
     def send_to_arduino(self, command):
@@ -966,14 +1253,14 @@ class UnifiedControlSystem:
         """Start camera preview in separate thread"""
         def camera_loop():
             self.camera_running = True
-            self.log(f"📷 Camera thread started at {time.time():.3f}")
+            self.log(f"Camera thread started at {time.time():.3f}")
             while self.camera_running:
                 try:
                     loop_start = time.time()
                     self.update_calib_preview_once()
                     loop_elapsed = time.time() - loop_start
                     if loop_elapsed > 0.08:
-                        self.log(f"📷 Camera frame took {loop_elapsed:.3f}s")
+                        self.log(f"Camera frame took {loop_elapsed:.3f}s")
                     # Sleep to maintain ~10 FPS (1 frame every 0.1 seconds)
                     time.sleep(max(0, 0.1 - loop_elapsed))
                 except Exception as e:
@@ -1108,16 +1395,16 @@ class UnifiedControlSystem:
         """Play selected sequence with simultaneous movement in background thread"""
         selection = self.seq_listbox.curselection()
         if not selection:
-            self.log("⚠ No sequence selected")
+            self.log("No sequence selected")
             return
 
         seq_name = self.seq_listbox.get(selection[0])
         if seq_name not in self.sequences:
-            self.log(f"⚠ Sequence '{seq_name}' not found")
+            self.log(f"Sequence '{seq_name}' not found")
             return
 
         if not self.is_connected:
-            self.log("⚠ Not connected to Arduino!")
+            self.log("Not connected to Arduino!")
             return
 
         # CRITICAL: Cancel all pending after callbacks (prevents event queue buildup)
@@ -1152,12 +1439,12 @@ class UnifiedControlSystem:
     def _play_sequence_thread(self, seq_name):
         """Background thread for playing sequence with proper cleanup"""
         try:
-            self.log(f"⏱️ Starting sequence {seq_name} at {time.time():.3f}")
+            self.log(f"[Timer]️ Starting sequence {seq_name} at {time.time():.3f}")
 
             for i, step in enumerate(self.sequences[seq_name]):
                 # Check if we should stop
                 if getattr(self, '_stop_sequence_flag', False):
-                    self.log("⏹️ Sequence stopped by user")
+                    self.log("Sequence stopped by user")
                     break
 
                 if 'angles' in step:
@@ -1179,12 +1466,12 @@ class UnifiedControlSystem:
 
                     step_elapsed = time.time() - step_start
                     if step_elapsed > 0.6:
-                        self._safe_after(0, lambda s=i+1, t=step_elapsed: self.log(f"⏱️ Step {s} took {t:.3f}s"))
+                        self._safe_after(0, lambda s=i+1, t=step_elapsed: self.log(f"[Timer]️ Step {s} took {t:.3f}s"))
 
-            self._safe_after(0, lambda: self.log(f"✓ Sequence complete"))
+            self._safe_after(0, lambda: self.log(f"Sequence complete"))
         except Exception as ex:
             error_msg = str(ex)
-            self._safe_after(0, lambda msg=error_msg: self.log(f"✗ Error: {msg}"))
+            self._safe_after(0, lambda msg=error_msg: self.log(f"Error: {msg}"))
         finally:
             # Clean up thread reference
             if hasattr(self, '_current_sequence_thread'):
@@ -1193,34 +1480,62 @@ class UnifiedControlSystem:
     def stop_sequence(self):
         """Stop sequence (placeholder)"""
         self._stop_sequence_flag = True
-        self.log("⏹️ Sequence stopped")
+        self.log("Sequence stopped")
     
     # Calibration Methods
     def start_calib_preview(self):
-        """Start calibration preview - Z-Star USB camera (video3 or video4)"""
-        self.log("Starting Z-Star camera (video3)...")
+        """Start calibration preview - uses configured camera index"""
+        # Get camera index from configuration
+        try:
+            camera_index = int(self.camera_index_var.get())
+        except (ValueError, AttributeError):
+            camera_index = 3  # Default fallback
+
+        self.log(f"Starting camera (device index: {camera_index})...")
 
         # Close any existing camera
         if hasattr(self, 'cap') and self.cap:
             self.cap.release()
 
-        # Try to open Z-Star camera (video3 - may change on replug)
-        self.cap = cv2.VideoCapture(3)
+        # Open camera at configured index
+        self.cap = cv2.VideoCapture(camera_index)
 
-        # If video3 fails, try video4 (Z-Star may move on replug)
+        # If primary index fails, try adjacent indices (Z-Star may move on replug)
         if not self.cap.isOpened():
-            self.log("video3 not available, trying video4...")
+            self.log(f"Device {camera_index} not available, trying {camera_index+1}...")
             self.cap.release()
-            self.cap = cv2.VideoCapture(4)
+            self.cap = cv2.VideoCapture(camera_index + 1)
+
+        # If still failing, try common Z-Star indices as fallback
+        if not self.cap.isOpened():
+            for fallback_idx in [3, 4]:
+                if fallback_idx != camera_index and fallback_idx != camera_index + 1:
+                    self.log(f"Trying fallback device {fallback_idx}...")
+                    self.cap.release()
+                    self.cap = cv2.VideoCapture(fallback_idx)
+                    if self.cap.isOpened():
+                        self.log(f"Fallback camera opened at {fallback_idx}")
+                        # Update UI to reflect the working camera
+                        self.camera_index_var.set(str(fallback_idx))
+                        break
 
         if self.cap.isOpened():
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            self.log("✓ Z-Star camera opened")
+            self.log(f"Camera opened successfully at /dev/video{camera_index}")
             self.update_calib_preview()
         else:
-            self.log("✗ ERROR: Z-Star camera not found on video3 or video4!")
-            messagebox.showerror("Camera Error", "Could not open Z-Star camera!\n\nTried: /dev/video3, /dev/video4\n\nMake sure:\n1. Camera is plugged in\n2. Try a different USB port")
+            self.log(f"ERROR: Camera not found at configured index {camera_index} or fallbacks!")
+            messagebox.showerror(
+                "Camera Error",
+                f"Could not open camera!\n\n"
+                f"Tried: /dev/video{camera_index}, /dev/video{camera_index+1}, /dev/video3, /dev/video4\n\n"
+                f"Make sure:\n"
+                f"1. Camera is plugged in\n"
+                f"2. Try a different USB port\n"
+                f"3. Use 'Find' button to detect available cameras\n"
+                f"4. Check if another application is using the camera"
+            )
     
     def update_calib_preview(self):
         """Update calibration preview - scale to fit canvas and center"""
@@ -1353,7 +1668,7 @@ class UnifiedControlSystem:
                         self.current_detection_cell = cell
                         self.pickup_btn.config(state='normal')
                         self.detection_status_label.config(
-                            text=f"📍 Object in {cell} - Ready to pickup!",
+                            text=f"Object in {cell} - Ready to pickup!",
                             foreground='green'
                         )
                         # Update static display at top of log
@@ -1559,9 +1874,9 @@ class UnifiedControlSystem:
             self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
             self.calib_canvas.image = photo
 
-            self.log("✓ Grid overlay drawn successfully!")
+            self.log("Grid overlay drawn successfully!")
         except Exception as e:
-            self.log(f"✗ Error drawing overlay: {e}")
+            self.log(f"Error drawing overlay: {e}")
             import traceback
             self.log(traceback.format_exc())
     
@@ -1617,7 +1932,7 @@ class UnifiedControlSystem:
         self._cancel_pending_callbacks()
 
         # Execute sequence in background thread
-        self.log(f"🤖 Starting pickup sequence for {cell}...")
+        self.log(f"Starting pickup sequence for {cell}...")
         self.pickup_btn.config(state='disabled')
 
         # Set stop flag for any currently playing sequence
@@ -1633,12 +1948,12 @@ class UnifiedControlSystem:
     def _execute_pickup_sequence(self, cell):
         """Execute pickup sequence in background thread with proper cleanup"""
         try:
-            self.log(f"⏱️ Starting pickup for {cell} at {time.time():.3f}")
+            self.log(f"[Timer]️ Starting pickup for {cell} at {time.time():.3f}")
 
             for i, step in enumerate(self.sequences[cell]):
                 # Check if we should stop
                 if getattr(self, '_stop_sequence_flag', False):
-                    self.log("⏹️ Pickup stopped")
+                    self.log("Pickup stopped")
                     break
 
                 if 'angles' in step:
@@ -1661,17 +1976,17 @@ class UnifiedControlSystem:
 
                     step_elapsed = time.time() - step_start
                     if step_elapsed > 0.6:
-                        self._safe_after(0, lambda s=i+1, t=step_elapsed: self.log(f"⏱️ Step {s} took {t:.3f}s"))
+                        self._safe_after(0, lambda s=i+1, t=step_elapsed: self.log(f"[Timer]️ Step {s} took {t:.3f}s"))
 
             total_elapsed = time.time() - step_start
-            self._safe_after(0, lambda c=cell: self.log(f"✓ Pickup for {c} complete! (Total: {total_elapsed:.3f}s)"))
-            self._safe_after(0, lambda: self.log("🤖 Object picked up successfully!"))
+            self._safe_after(0, lambda c=cell: self.log(f"Pickup for {c} complete! (Total: {total_elapsed:.3f}s)"))
+            self._safe_after(0, lambda: self.log("Object picked up successfully!"))
 
             # Recapture empty grid after successful pickup
             self._safe_after(1000, self._recapture_empty_grid_after_pickup)
 
         except Exception as e:
-            self._safe_after(0, lambda: self.log(f"✗ Pickup error: {e}"))
+            self._safe_after(0, lambda: self.log(f"Pickup error: {e}"))
             self._safe_after(0, lambda: self.pickup_btn.config(state='normal'))
         finally:
             # Clean up thread reference
@@ -1680,15 +1995,15 @@ class UnifiedControlSystem:
 
     def _recapture_empty_grid_after_pickup(self):
         """Recapture empty grid reference after pickup"""
-        self.log("📸 Recapturing empty grid reference...")
+        self.log("Recapturing empty grid reference...")
 
         ret, frame = self.cap.read()
         if ret:
             self.empty_grid = frame.copy()
             cv2.imwrite(BG_FILE, self.empty_grid)
-            self.log("✓ Empty grid reference updated")
+            self.log("Empty grid reference updated")
         else:
-            self.log("⚠ Could not recapture empty grid")
+            self.log("Could not recapture empty grid")
 
         # Clear detection state
         self._clear_detection_after_pickup()
@@ -1725,7 +2040,7 @@ class UnifiedControlSystem:
                 for name, angles in saved_presets.items():
                     if name in LEGACY_PRESETS:
                         LEGACY_PRESETS[name] = angles
-                        self.log(f"✓ Loaded preset: {name} = {angles}")
+                        self.log(f"Loaded preset: {name} = {angles}")
 
                 # Update defaults
                 if 'Rest' in saved_presets:
@@ -1734,7 +2049,7 @@ class UnifiedControlSystem:
                     DEFAULT_PICKUP[:] = saved_presets['Pickup']
 
             except Exception as e:
-                self.log(f"⚠ Could not load presets: {e}")
+                self.log(f"Could not load presets: {e}")
         else:
             self.log("Using default presets")
 
@@ -1747,9 +2062,9 @@ class UnifiedControlSystem:
             }
             with open(PRESETS_FILE, 'w') as f:
                 json.dump(presets_to_save, f, indent=2)
-            self.log(f"✓ Presets saved to {PRESETS_FILE}")
+            self.log(f"Presets saved to {PRESETS_FILE}")
         except Exception as e:
-            self.log(f"✗ Could not save presets: {e}")
+            self.log(f"Could not save presets: {e}")
 
     def auto_go_to_rest_on_startup(self):
         """Auto-go to rest position on startup if connected"""
@@ -1780,7 +2095,7 @@ class UnifiedControlSystem:
                         self.log(f"  {seq_name}: {preset_name} -> {angles}")
             self.sequences[seq_name] = converted_steps
 
-        self.log(f"✓ Loaded {len(self.sequences)} legacy sequences")
+        self.log(f"Loaded {len(self.sequences)} legacy sequences")
 
         # Also try to load from file
         if os.path.exists(SEQUENCES_FILE):
@@ -1790,7 +2105,7 @@ class UnifiedControlSystem:
                 for seq_name, steps in file_sequences.items():
                     if seq_name not in self.sequences:
                         self.sequences[seq_name] = steps
-                        self.log(f"✓ Loaded additional sequence: {seq_name}")
+                        self.log(f"Loaded additional sequence: {seq_name}")
             except Exception as e:
                 self.log(f"Could not load sequences from file: {e}")
     
@@ -1873,7 +2188,7 @@ class UnifiedControlSystem:
                     # Refresh cell list
                     self.cell_listbox.delete(0, tk.END)
                     for c in CELL_NAMES:
-                        has_seq = "✓" if c in self.sequences else ""
+                        has_seq = "[OK]" if c in self.sequences else ""
                         self.cell_listbox.insert(tk.END, f"{c} {has_seq}")
 
                     # Refresh sequence listbox
@@ -1934,7 +2249,7 @@ class UnifiedControlSystem:
             # Refresh cell list
             self.cell_listbox.delete(0, tk.END)
             for c in CELL_NAMES:
-                has_seq = "✓" if c in self.sequences else ""
+                has_seq = "[OK]" if c in self.sequences else ""
                 self.cell_listbox.insert(tk.END, f"{c} {has_seq}")
 
             # Refresh sequence listbox
@@ -1988,7 +2303,7 @@ class UnifiedControlSystem:
         paste_frame = ttk.Frame(dialog)
         paste_frame.pack(pady=5)
 
-        ttk.Button(paste_frame, text="📌 Paste from Clipboard",
+        ttk.Button(paste_frame, text="Paste from Clipboard",
                   command=lambda: self.paste_to_insert_dialog(angle_vars, dialog, insert_pos)).pack()
 
         ttk.Label(dialog, text="— OR create new step —", foreground='gray').pack(pady=5)
@@ -2044,8 +2359,24 @@ class UnifiedControlSystem:
         for i, var in enumerate(angle_vars):
             var.set(str(angles[i]))
 
-        self.log(f"📋 Pasted {angles} to insert dialog")
-    
+        self.log(f"Pasted {angles} to insert dialog")
+
+    def paste_step_to_editor(self):
+        """Paste clipboard step to sequence editor"""
+        if not hasattr(self, 'step_clipboard') or not self.step_clipboard:
+            messagebox.showinfo("Info", "Clipboard is empty\n\nCopy a step first (right-click on a step → Copy Step)")
+            return
+
+        # Use first step from clipboard
+        angles = self.step_clipboard[0]
+
+        # Add to steps listbox
+        index = self.steps_listbox.size()
+        self.steps_listbox.insert(tk.END, f"{index + 1}. {angles}")
+
+        self.log(f"Pasted step {angles} to editor")
+        messagebox.showinfo("Pasted!", f"Step pasted to sequence editor:\n{angles}")
+
     def remove_step(self):
         """Remove selected step"""
         selection = self.steps_listbox.curselection()
@@ -2078,14 +2409,14 @@ class UnifiedControlSystem:
         self.step_menu = tk.Menu(self.root, tearoff=0)
         self.step_menu.add_command(label="✏️ Edit Step", command=self.edit_selected_step)
         self.step_menu.add_separator()
-        self.step_menu.add_command(label="📋 Copy Step", command=self.copy_selected_step)
-        self.step_menu.add_command(label="📋 Copy All Steps", command=self.copy_all_steps)
+        self.step_menu.add_command(label="Copy Step", command=self.copy_selected_step)
+        self.step_menu.add_command(label="Copy All Steps", command=self.copy_all_steps)
         self.step_menu.add_separator()
         self.step_menu.add_command(label="✂️ Cut Step", command=self.cut_selected_step)
         self.step_menu.add_separator()
         self.step_menu.add_command(label="🗑️ Delete Step", command=self.remove_step)
         self.step_menu.add_separator()
-        self.step_menu.add_command(label="📌 Paste Step", command=self.paste_step)
+        self.step_menu.add_command(label="Paste Step", command=self.paste_step)
 
         # Bind right-click and double-click
         self.steps_listbox.bind('<Button-3>', self.show_step_menu)
@@ -2160,7 +2491,19 @@ class UnifiedControlSystem:
             except ValueError:
                 messagebox.showerror("Error", "All angles must be numbers")
 
-        ttk.Button(dialog, text="Save Changes", command=save_edit).pack(pady=10)
+        def paste_to_edit():
+            if not hasattr(self, 'step_clipboard') or not self.step_clipboard:
+                messagebox.showinfo("Info", "Clipboard is empty\n\nCopy a step first (right-click → Copy Step)")
+                return
+            angles = self.step_clipboard[0]
+            for i, var in enumerate(angle_vars):
+                var.set(str(angles[i]))
+            self.log(f"Pasted {angles} to edit dialog")
+
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        ttk.Button(btn_frame, text="Save Changes", command=save_edit).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Paste", command=paste_to_edit).pack(side=tk.LEFT, padx=5)
         ttk.Button(dialog, text="Cancel", command=dialog.destroy).pack()
 
     def copy_selected_step(self):
@@ -2234,7 +2577,7 @@ class UnifiedControlSystem:
                 steps.append({'angles': angles, 'delay': 1000})
                 self.log(f"  Step {i+1}: {angles}")
             except Exception as e:
-                self.log(f"⚠ Could not parse step {i+1}: {e}")
+                self.log(f"Could not parse step {i+1}: {e}")
 
         if not steps:
             messagebox.showwarning("Warning", "No steps in sequence!")
@@ -2249,13 +2592,13 @@ class UnifiedControlSystem:
         # Update cell list
         self.cell_listbox.delete(0, tk.END)
         for cell in CELL_NAMES:
-            has_seq = "✓" if cell in self.sequences else ""
+            has_seq = "[OK]" if cell in self.sequences else ""
             self.cell_listbox.insert(tk.END, f"{cell} {has_seq}")
 
         # Refresh sequence listbox in Manual Control tab
         self.refresh_seq_list()
 
-        self.log(f"✓ Saved sequence to {self.current_cell} ({len(steps)} steps)")
+        self.log(f"Saved sequence to {self.current_cell} ({len(steps)} steps)")
         messagebox.showinfo("Success", f"Sequence saved to {self.current_cell}!\n\n{len(steps)} steps")
     
     def load_rest_preset(self):
@@ -2277,7 +2620,7 @@ class UnifiedControlSystem:
         angles = [int(self.input_boxes[i].get()) for i in range(5)]
         LEGACY_PRESETS['Rest'] = angles
         DEFAULT_REST[:] = angles
-        self.log(f"✓ Rest position updated to: {angles}")
+        self.log(f"Rest position updated to: {angles}")
         self.save_presets()
         messagebox.showinfo("Rest Updated", f"New Rest position saved:\n{angles}\n\nThis will persist after restart!")
 
@@ -2286,7 +2629,7 @@ class UnifiedControlSystem:
         angles = [int(self.input_boxes[i].get()) for i in range(5)]
         LEGACY_PRESETS['Pickup'] = angles
         DEFAULT_PICKUP[:] = angles
-        self.log(f"✓ Pickup position updated to: {angles}")
+        self.log(f"Pickup position updated to: {angles}")
         self.save_presets()
         messagebox.showinfo("Pickup Updated", f"New Pickup position saved:\n{angles}\n\nThis will persist after restart!")
     
