@@ -83,7 +83,7 @@ DEFAULT_REST = [150, 0, 70, 70, 140]
 DEFAULT_PICKUP = [80, 100, 20, 0, 0]
 
 JOINT_NAMES = ["Base", "Shoulder", "Elbow", "Wrist", "Gripper"]
-CELL_NAMES = [f"{chr(ord('A')+row)}{col+1}" for row in range(4) for col in range(4)]
+CELL_NAMES = [f"{chr(ord('A')+row)}{col+1}" for row in range(4) for col in range(5)]  # 4 rows x 5 columns
 
 # File paths
 CALIBRATION_FILE = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/vision_calibration.json'
@@ -471,17 +471,27 @@ Auto Pickup Mode:
     
     def setup_sequences_tab(self):
         """Setup sequences tab"""
-        # Left: Cell list
+        # Left: Cell list - show ALL sequences (original + _NON variants)
         left_frame = ttk.LabelFrame(self.seq_tab, text="Grid Cells", padding="10")
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        self.cell_listbox = tk.Listbox(left_frame, height=16, width=15)
+
+        self.cell_listbox = tk.Listbox(left_frame, height=16, width=18)
         self.cell_listbox.pack(fill=tk.BOTH, expand=True)
         self.cell_listbox.bind('<<ListboxSelect>>', self.on_cell_select)
-        
+
+        # First show original cells (A1-E4) - 4 rows x 5 columns = 20 cells
+        ttk.Label(left_frame, text="Biodegradable (base=180°):", font=('Helvetica', 9, 'bold')).pack(anchor='w')
         for cell in CELL_NAMES:
             has_seq = "[OK]" if cell in self.sequences else ""
             self.cell_listbox.insert(tk.END, f"{cell} {has_seq}")
+
+        # Then show NON variants (A1_NON-E4_NON)
+        ttk.Separator(left_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+        ttk.Label(left_frame, text="Non-biodegradable (base=0°):", font=('Helvetica', 9, 'bold')).pack(anchor='w')
+        for cell in CELL_NAMES:
+            non_cell = f"{cell}_NON"
+            has_seq = "[OK]" if non_cell in self.sequences else ""
+            self.cell_listbox.insert(tk.END, f"{non_cell} {has_seq}")
         
         # Middle: Sequence editor
         mid_frame = ttk.LabelFrame(self.seq_tab, text="Sequence Editor", padding="10")
@@ -2255,32 +2265,34 @@ Auto Pickup Mode:
                 self.log(f"Could not load sequences from file: {e}")
     
     def on_cell_select(self, event):
-        """Handle cell selection"""
+        """Handle cell selection - works with both original and _NON sequences"""
         selection = self.cell_listbox.curselection()
         if not selection:
             return
 
-        cell = CELL_NAMES[selection[0]]
-        self.current_cell = cell
-        self.selected_cell_label.config(text=cell)
+        # Get cell name from listbox text (first word, before any [OK] marker)
+        cell_text = self.cell_listbox.get(selection[0]).split()[0]
+        self.current_cell = cell_text
+        self.selected_cell_label.config(text=cell_text)
 
         # Load steps
         self.steps_listbox.delete(0, tk.END)
-        if cell in self.sequences:
-            for i, step in enumerate(self.sequences[cell]):
+        if cell_text in self.sequences:
+            for i, step in enumerate(self.sequences[cell_text]):
                 angles = step.get('angles', [0,0,0,0,0])
                 self.steps_listbox.insert(tk.END, f"{i+1}. {angles}")
 
-            self.log(f"Loaded sequence for {cell} ({len(self.sequences[cell])} steps)")
+            self.log(f"Loaded sequence for {cell_text} ({len(self.sequences[cell_text])} steps)")
         else:
-            self.log(f"No sequence saved for {cell}")
+            self.log(f"No sequence saved for {cell_text}")
 
     def load_selected_sequence_to_editor(self):
         """Load selected sequence - works with cell selection OR sequence listbox"""
         # First try cell selection (primary method)
         cell_selection = self.cell_listbox.curselection()
         if cell_selection:
-            cell = CELL_NAMES[cell_selection[0]]
+            # Get cell name from listbox text
+            cell = self.cell_listbox.get(cell_selection[0]).split()[0]
             if cell in self.sequences:
                 self.on_cell_select(None)
                 self.log(f"Loaded {cell} sequence for editing ({len(self.sequences[cell])} steps)")
@@ -2299,13 +2311,12 @@ Auto Pickup Mode:
         if seq_name not in self.sequences:
             return
 
-        # Find which cell this sequence belongs to
-        for cell, seq in self.sequences.items():
-            if seq == self.sequences.get(seq_name):
-                # Select that cell
-                cell_index = CELL_NAMES.index(cell)
+        # Find which cell this sequence belongs to and select it in listbox
+        for i in range(self.cell_listbox.size()):
+            cell_text = self.cell_listbox.get(i).split()[0]
+            if cell_text == seq_name:
                 self.cell_listbox.selection_clear(0, tk.END)
-                self.cell_listbox.selection_set(cell_index)
+                self.cell_listbox.selection_set(i)
                 self.on_cell_select(None)
                 self.log(f"Loaded '{seq_name}' for editing")
                 return
@@ -2827,9 +2838,9 @@ Auto Pickup Mode:
                         grid_width = max(all_x) - min(all_x)
                         grid_height = max(all_y) - min(all_y)
 
-                        # Cell size in current frame coordinates
-                        cell_width = grid_width / 4.0
-                        cell_height = grid_height / 4.0
+                        # Cell size in current frame coordinates (4 rows x 5 columns)
+                        cell_width = grid_width / 5.0  # 5 columns
+                        cell_height = grid_height / 4.0  # 4 rows
 
                         # Calculate how many cells the object spans
                         obj_cells_width = w / cell_width
@@ -2867,11 +2878,11 @@ Auto Pickup Mode:
         return objects
     
     def find_cell(self, x, y):
-        """Find which cell contains point (x, y)"""
+        """Find which cell contains point (x, y) - supports 4 rows x 5 columns"""
         # First try calibrated grid points
         if self.is_calibrated and len(self.all_points) >= 25:
             for row in range(4):
-                for col in range(4):
+                for col in range(5):  # 5 columns
                     idx1 = row * 5 + col
                     idx2 = idx1 + 1
                     idx3 = idx1 + 5
@@ -2896,14 +2907,14 @@ Auto Pickup Mode:
         if hasattr(self, 'empty_grid') and self.empty_grid is not None:
             h, w = self.empty_grid.shape[:2]
 
-            # Divide into 4x4 grid
-            cell_w = w / 4
-            cell_h = h / 4
+            # Divide into 4x5 grid
+            cell_w = w / 5  # 5 columns
+            cell_h = h / 4  # 4 rows
 
             col = int(x / cell_w)
             row = int(y / cell_h)
 
-            if 0 <= row < 4 and 0 <= col < 4:
+            if 0 <= row < 4 and 0 <= col < 5:  # 5 columns
                 cell = f"{chr(ord('A')+row)}{col+1}"
                 return cell
 
