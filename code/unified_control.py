@@ -83,7 +83,7 @@ DEFAULT_REST = [150, 0, 70, 70, 140]
 DEFAULT_PICKUP = [80, 100, 20, 0, 0]
 
 JOINT_NAMES = ["Base", "Shoulder", "Elbow", "Wrist", "Gripper"]
-CELL_NAMES = [f"{chr(ord('A')+row)}{col+1}" for row in range(4) for col in range(5)]  # 4 rows x 5 columns
+CELL_NAMES = [f"{chr(ord('A')+row)}{col+1}" for row in range(4) for col in range(4)]  # 4x4 = 16 cells
 
 # File paths
 CALIBRATION_FILE = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/vision_calibration.json'
@@ -479,13 +479,13 @@ Auto Pickup Mode:
         self.cell_listbox.pack(fill=tk.BOTH, expand=True)
         self.cell_listbox.bind('<<ListboxSelect>>', self.on_cell_select)
 
-        # First show original cells (A1-E4) - 4 rows x 5 columns = 20 cells
+        # First show original cells (A1-D4) - 4x4 = 16 cells
         ttk.Label(left_frame, text="Biodegradable (base=180°):", font=('Helvetica', 9, 'bold')).pack(anchor='w')
         for cell in CELL_NAMES:
             has_seq = "[OK]" if cell in self.sequences else ""
             self.cell_listbox.insert(tk.END, f"{cell} {has_seq}")
 
-        # Then show NON variants (A1_NON-E4_NON)
+        # Then show NON variants (A1_NON-D4_NON)
         ttk.Separator(left_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
         ttk.Label(left_frame, text="Non-biodegradable (base=0°):", font=('Helvetica', 9, 'bold')).pack(anchor='w')
         for cell in CELL_NAMES:
@@ -1871,24 +1871,24 @@ Auto Pickup Mode:
             cv2.imwrite(BG_FILE, self.empty_grid)
             self.log("Empty grid reference captured")
         
-        # Calculate 25 points
+        # Calculate 25 points for 4x4 grid (5 rows x 5 columns of points)
         tl = np.array(self.corners[0], dtype=np.float32)
         tr = np.array(self.corners[1], dtype=np.float32)
         bl = np.array(self.corners[2], dtype=np.float32)
         br = np.array(self.corners[3], dtype=np.float32)
-        
+
         self.all_points = []
-        for row in range(5):
-            for col in range(5):
-                t = col / 4.0
+        for row in range(5):  # 5 rows of points
+            for col in range(5):  # 5 columns of points
+                t = col / 4.0  # 0, 0.25, 0.5, 0.75, 1.0
                 u = row / 4.0
                 top = tl + (tr - tl) * t
                 bottom = bl + (br - bl) * t
                 point = top + (bottom - top) * u
                 self.all_points.append((int(point[0]), int(point[1])))
-        
+
         self.is_calibrated = True
-        self.log(f"Grid calculated: {len(self.all_points)} points")
+        self.log(f"Grid calculated: {len(self.all_points)} points (4x4 grid = 16 cells)")
 
         # Grid overlay will now be drawn automatically by update_calib_preview
 
@@ -1899,17 +1899,17 @@ Auto Pickup Mode:
         self.log("Auto pickup enabled")
 
     def draw_grid_overlay(self):
-        """Draw digital grid lines on calibration canvas"""
+        """Draw digital grid lines on calibration canvas - 4x4 grid (16 cells)"""
         try:
             if not self.is_calibrated:
                 self.log("Cannot draw overlay: not calibrated")
                 return
 
             if len(self.all_points) < 25:
-                self.log(f"Cannot draw overlay: only {len(self.all_points)} points")
+                self.log(f"Cannot draw overlay: only {len(self.all_points)} points, need 25")
                 return
 
-            self.log(f"Drawing grid overlay with {len(self.all_points)} points...")
+            self.log(f"Drawing grid overlay with {len(self.all_points)} points (4x4 grid)...")
 
             # Get current frame from camera
             ret, frame = self.cap.read()
@@ -1920,23 +1920,25 @@ Auto Pickup Mode:
             self.log("Camera frame obtained, drawing lines...")
 
             # Draw grid lines on frame
+            # 5 horizontal lines (creating 4 rows)
             for row in range(5):
-                # Draw horizontal line
-                idx1 = row * 5
-                idx2 = idx1 + 4
-                if idx2 < len(self.all_points):
-                    pt1 = self.all_points[idx1]
-                    pt2 = self.all_points[idx2]
+                # Draw horizontal line across the row
+                start_idx = row * 5  # First point in row (5 points per row)
+                end_idx = start_idx + 4  # Last point in row
+                if end_idx < len(self.all_points):
+                    pt1 = self.all_points[start_idx]
+                    pt2 = self.all_points[end_idx]
                     self.log(f"  Horizontal {row}: {pt1} -> {pt2}")
                     cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
 
+            # 5 vertical lines (creating 4 columns)
             for col in range(5):
-                # Draw vertical line
-                idx1 = col
-                idx2 = col + 20
-                if idx2 < len(self.all_points):
-                    pt1 = self.all_points[idx1]
-                    pt2 = self.all_points[idx2]
+                # Draw vertical line down the column
+                top_idx = col  # Top point in column
+                bottom_idx = 20 + col  # Bottom point (4 rows down = 20 points)
+                if bottom_idx < len(self.all_points):
+                    pt1 = self.all_points[top_idx]
+                    pt2 = self.all_points[bottom_idx]
                     self.log(f"  Vertical {col}: {pt1} -> {pt2}")
                     cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
 
@@ -2830,11 +2832,11 @@ Auto Pickup Mode:
                 # Disregard objects outside the grid (cell returns '?' or invalid)
                 if cell and cell != '?' and cell[0] in ['A', 'B', 'C', 'D']:
                     # Check if object spans more than 4 grid cells (only if calibrated)
-                    if self.is_calibrated and len(self.all_points) >= 25:
+                    if self.is_calibrated and len(self.all_points) >= 30:
                         # Get grid dimensions from calibrated points
                         # Use the full grid bounds to calculate cell size in the CURRENT frame
-                        all_x = [p[0] for p in self.all_points[:25]]
-                        all_y = [p[1] for p in self.all_points[:25]]
+                        all_x = [p[0] for p in self.all_points[:30]]
+                        all_y = [p[1] for p in self.all_points[:30]]
                         grid_width = max(all_x) - min(all_x)
                         grid_height = max(all_y) - min(all_y)
 
@@ -2878,11 +2880,11 @@ Auto Pickup Mode:
         return objects
     
     def find_cell(self, x, y):
-        """Find which cell contains point (x, y) - supports 4 rows x 5 columns"""
-        # First try calibrated grid points
+        """Find which cell contains point (x, y) - 4x4 grid (16 cells)"""
+        # First try calibrated grid points (25 points for 4x4 grid)
         if self.is_calibrated and len(self.all_points) >= 25:
             for row in range(4):
-                for col in range(5):  # 5 columns
+                for col in range(4):
                     idx1 = row * 5 + col
                     idx2 = idx1 + 1
                     idx3 = idx1 + 5
@@ -2907,14 +2909,14 @@ Auto Pickup Mode:
         if hasattr(self, 'empty_grid') and self.empty_grid is not None:
             h, w = self.empty_grid.shape[:2]
 
-            # Divide into 4x5 grid
-            cell_w = w / 5  # 5 columns
-            cell_h = h / 4  # 4 rows
+            # Divide into 4x4 grid
+            cell_w = w / 4
+            cell_h = h / 4
 
             col = int(x / cell_w)
             row = int(y / cell_h)
 
-            if 0 <= row < 4 and 0 <= col < 5:  # 5 columns
+            if 0 <= row < 4 and 0 <= col < 4:
                 cell = f"{chr(ord('A')+row)}{col+1}"
                 return cell
 
