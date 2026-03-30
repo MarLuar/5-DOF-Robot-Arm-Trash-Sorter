@@ -136,6 +136,14 @@ class UnifiedControlSystem:
         self.detection_timeout = 3.0  # Keep detection for 3 seconds
         self.last_detected_cell = None
 
+        # Auto-pickup state tracking
+        self.auto_pickup_enabled = False
+        self.object_first_detected_time = 0
+        self.auto_pickup_thread = None
+        self.auto_pickup_running = False
+        self.pending_pickup_cell = None  # Cell waiting for confirmation
+        self.object_confirmation_delay = 4.0  # Object must be present for 4 seconds before auto pickup
+
         # Performance optimizations
         self.serial_lock = threading.Lock()  # Thread-safe serial access
         self.frame_count = 0  # For frame skipping
@@ -153,12 +161,14 @@ class UnifiedControlSystem:
         self.main_thread_id = threading.current_thread().ident
         self.last_command_time = 0
 
+        # Load saved camera setting BEFORE UI setup (calibration tab needs it)
+        self.load_camera_setting()  # Auto-load saved camera setting
+
         # Setup UI
         self.setup_ui()
         self.refresh_ports()
         self.load_calibration()
         self.load_presets()  # Load user-modified presets
-        self.load_camera_setting()  # Auto-load saved camera setting
 
         # Start logging
         self.log("System initialized - v1.00.02")
@@ -384,6 +394,14 @@ class UnifiedControlSystem:
         self.pickup_btn = ttk.Button(btn_frame, text="PICKUP OBJECT", command=self.pickup_detected_object, state='disabled')
         self.pickup_btn.pack(side=tk.LEFT, padx=10)
 
+        # Auto Pickup toggle
+        self.auto_pickup_var = tk.BooleanVar(value=False)
+        self.auto_pickup_chk = ttk.Checkbutton(btn_frame, text="Auto Pickup",
+                       variable=self.auto_pickup_var,
+                       command=self.toggle_auto_pickup)
+        self.auto_pickup_chk.pack(side=tk.LEFT, padx=10)
+        self.auto_pickup_chk.config(state='disabled')  # Disabled until calibrated
+
         # Detection status label
         self.detection_status_label = ttk.Label(btn_frame, text="No object detected", foreground='gray')
         self.detection_status_label.pack(side=tk.LEFT, padx=10)
@@ -416,10 +434,15 @@ class UnifiedControlSystem:
    - Yellow boxes show detections
    - Check System Log for coordinates
 
-5. Click "PICKUP OBJECT"
-   - Executes sequence for that cell
-   - Automatically picks up object
+5. Click "PICKUP OBJECT" or enable "Auto Pickup"
+   - Manual: Executes sequence for that cell
+   - Auto: Waits 4 seconds, then automatically picks up
    - Status shows pickup progress
+
+Auto Pickup Mode:
+   - Object must be present for 4 seconds before pickup
+   - Prevents false triggers from brief detections
+   - Click checkbox again to disable auto mode
 """
         ttk.Label(instr_frame, text=instructions, justify=tk.LEFT).pack(anchor='w')
 
@@ -1645,58 +1668,100 @@ class UnifiedControlSystem:
                 if self.frame_count % 5 == 0:
                     objects = self.detect_objects(frame)
                     if objects:
+                        # New detection found - update and reset timer
                         self.last_detection_time = time.time()
                         self.last_detected_cell = max(objects, key=lambda o: o['area'])
                         self.last_detected_cell['cell'] = self.find_cell(self.last_detected_cell['cx'], self.last_detected_cell['cy'])
+                    # If no objects detected, keep using persisted last_detected_cell if still within timeout
+                    # This prevents flickering when detection momentarily fails
                 else:
                     # Use persisted detection (prevents flickering)
-                    if time.time() - self.last_detection_time < 3.0 and self.last_detected_cell:
+                    objects = []
+
+                # Apply persistence: use last_detected_cell if within timeout
+                if hasattr(self, 'last_detected_cell') and self.last_detected_cell:
+                    if time.time() - self.last_detection_time < 3.0:
+                        # Still within persistence window - use last known detection
                         objects = [self.last_detected_cell]
+                        cell = self.last_detected_cell.get('cell', '?')
                     else:
+                        # Timeout expired - clear detection
                         objects = []
                         self.last_detected_cell = None
+                        cell = '?'
+                else:
+                    cell = '?'
 
                 # Track detected objects and enable pickup button
                 self.detected_objects = objects
 
-                if objects and self.last_detected_cell:
-                    # Use the persisted detection
-                    cell = self.last_detected_cell.get('cell', '?')
-
+                # Check if we have a valid cell detection (from persisted or current detection)
+                if cell and cell != '?' and self.last_detected_cell:
                     # Check if cell has a sequence and is A, B, or C (not D)
-                    if cell and cell != '?' and cell in self.sequences and cell[0] in ['A', 'B', 'C']:
+                    if cell in self.sequences and cell[0] in ['A', 'B', 'C']:
                         self.current_detection_cell = cell
                         self.pickup_btn.config(state='normal')
-                        self.detection_status_label.config(
-                            text=f"Object in {cell} - Ready to pickup!",
-                            foreground='green'
-                        )
-                        # Update static display at top of log
-                        self.update_detection_display(cell)
+
+                        # Auto-pickup logic: wait 2 seconds before triggering
+                        if self.auto_pickup_enabled and self.auto_pickup_running:
+                            # Check if this is the same cell as pending pickup
+                            if self.pending_pickup_cell == cell:
+                                # Check if object has been present for 2 seconds
+                                elapsed = time.time() - self.object_first_detected_time
+                                if elapsed >= self.object_confirmation_delay:
+                                    # Trigger auto pickup!
+                                    self.log(f"[AUTO] Object confirmed in {cell} after {elapsed:.1f}s - Starting pickup!")
+                                    self.auto_pickup_running = False  # Prevent re-triggering
+                                    self.pending_pickup_cell = None
+                                    self.root.after(0, self.auto_trigger_pickup)
+                                else:
+                                    # Still waiting for confirmation
+                                    remaining = self.object_confirmation_delay - elapsed
+                                    self.detection_status_label.config(
+                                        text=f"Auto: {cell} ({remaining:.1f}s)",
+                                        foreground='orange'
+                                    )
+                                    self.update_detection_display(f"{cell} ({remaining:.1f}s)")
+                            else:
+                                # New cell detected, reset timer
+                                self.pending_pickup_cell = cell
+                                self.object_first_detected_time = time.time()
+                                self.log(f"[AUTO] Object detected in {cell}, waiting {self.object_confirmation_delay}s confirmation...")
+                        else:
+                            # Manual mode
+                            self.detection_status_label.config(
+                                text=f"Object in {cell} - Ready to pickup!",
+                                foreground='green'
+                            )
+                            self.update_detection_display(cell)
                     else:
+                        # Cell detected but no sequence or invalid row
                         self.current_detection_cell = None
                         self.pickup_btn.config(state='disabled')
-                        if cell and cell != '?':
-                            if cell[0] in ['A', 'B', 'C']:
-                                self.detection_status_label.config(
-                                    text=f"Object in {cell} (no sequence)",
-                                    foreground='orange'
-                                )
-                            else:
-                                self.detection_status_label.config(
-                                    text=f"Object in {cell} (cell D not supported)",
-                                    foreground='orange'
-                                )
+                        # Reset auto-pickup if object in wrong cell
+                        if self.auto_pickup_enabled and self.auto_pickup_running:
+                            self.pending_pickup_cell = None
+                            self.object_first_detected_time = 0
+                        if cell[0] in ['A', 'B', 'C']:
+                            self.detection_status_label.config(
+                                text=f"Object in {cell} (no sequence)",
+                                foreground='orange'
+                            )
                         else:
                             self.detection_status_label.config(
-                                text="Object detected (outside grid)",
+                                text=f"Object in {cell} (cell D not supported)",
                                 foreground='orange'
                             )
                         # Update static display
-                        self.update_detection_display(cell if cell != '?' else None)
+                        self.update_detection_display(cell)
                 else:
+                    # No object detected
                     self.current_detection_cell = None
                     self.pickup_btn.config(state='disabled')
+                    # Reset auto-pickup if no object
+                    if self.auto_pickup_enabled and self.auto_pickup_running:
+                        self.pending_pickup_cell = None
+                        self.object_first_detected_time = 0
                     self.detection_status_label.config(
                         text="No object detected",
                         foreground='gray'
@@ -1776,6 +1841,12 @@ class UnifiedControlSystem:
         self.is_calibrated = False
         self.corner_label.config(text="Corners clicked: 0/4")
         self.calc_btn.config(state='disabled')
+        # Reset auto pickup state
+        self.auto_pickup_enabled = False
+        self.auto_pickup_running = False
+        self.pending_pickup_cell = None
+        self.auto_pickup_var.set(False)
+        self.auto_pickup_chk.config(state='disabled')
         self.log("Calibration reset")
     
     def calculate_grid(self):
@@ -1812,6 +1883,10 @@ class UnifiedControlSystem:
         # Grid overlay will now be drawn automatically by update_calib_preview
 
         messagebox.showinfo("Success", f"Grid calculated!\n\n{len(self.all_points)} points generated\n\nEmpty grid captured!\n\nGrid lines are now visible on the camera preview!\n\nGo to Auto Detection tab to test")
+
+        # Enable auto pickup checkbox after calibration
+        self.auto_pickup_chk.config(state='normal')
+        self.log("Auto pickup enabled")
 
     def draw_grid_overlay(self):
         """Draw digital grid lines on calibration canvas"""
@@ -1899,8 +1974,67 @@ class UnifiedControlSystem:
             # Clear detection state
             self.detected_objects = []
             self.current_detection_cell = None
+            self.auto_pickup_enabled = False
+            self.auto_pickup_running = False
+            self.pending_pickup_cell = None
             self.pickup_btn.config(state='disabled')
+            self.auto_pickup_chk.config(state='disabled')
             self.detection_status_label.config(text="No object detected", foreground='gray')
+
+    def toggle_auto_pickup(self):
+        """Toggle auto pickup mode"""
+        self.auto_pickup_enabled = self.auto_pickup_var.get()
+
+        if self.auto_pickup_enabled:
+            self.auto_pickup_running = True
+            self.pending_pickup_cell = None
+            self.object_first_detected_time = 0
+            self.log(f"[AUTO] Auto pickup ENABLED - Will pickup objects after {self.object_confirmation_delay:.0f} second confirmation")
+            self.detection_status_label.config(
+                text="Auto mode: Waiting for object...",
+                foreground='blue'
+            )
+        else:
+            self.auto_pickup_running = False
+            self.pending_pickup_cell = None
+            self.object_first_detected_time = 0
+            self.log("[AUTO] Auto pickup DISABLED")
+            self.detection_status_label.config(
+                text="Manual mode",
+                foreground='gray'
+            )
+
+    def auto_trigger_pickup(self):
+        """Automatically trigger pickup without confirmation dialog"""
+        if not self.current_detection_cell:
+            return
+
+        cell = self.current_detection_cell
+
+        if cell not in self.sequences:
+            self.log(f"[AUTO] No sequence for {cell}, skipping")
+            return
+
+        if not self.is_connected:
+            self.log("[AUTO] Not connected to Arduino, cannot pickup")
+            messagebox.showerror("Error", "Not connected to Arduino!")
+            return
+
+        # CRITICAL: Cancel all pending after callbacks
+        self._cancel_pending_callbacks()
+
+        # Execute sequence in background thread
+        self.log(f"[AUTO] Starting automatic pickup for {cell}...")
+        self.pickup_btn.config(state='disabled')
+
+        # Set stop flag for any currently playing sequence
+        self._stop_sequence_flag = True
+        time.sleep(0.1)
+
+        # Start new pickup sequence
+        self._stop_sequence_flag = False
+        thread = threading.Thread(target=self._execute_pickup_sequence, args=(cell,), daemon=True)
+        thread.start()
 
     def pickup_detected_object(self):
         """Execute sequence for detected object"""
@@ -2013,12 +2147,23 @@ class UnifiedControlSystem:
         self.detected_objects = []
         self.current_detection_cell = None
         self.pickup_btn.config(state='disabled')
-        self.detection_status_label.config(text="Pickup complete!", foreground='green')
 
-        # Reset status after 3 seconds
-        self.root.after(3000, lambda: self.detection_status_label.config(
-            text="No object detected", foreground='gray'
-        ))
+        # Re-enable auto pickup if it was enabled
+        if self.auto_pickup_enabled:
+            self.auto_pickup_running = True
+            self.pending_pickup_cell = None
+            self.object_first_detected_time = 0
+            self.detection_status_label.config(
+                text="Auto: Ready for next object...",
+                foreground='blue'
+            )
+            self.log("[AUTO] Ready for next object...")
+        else:
+            self.detection_status_label.config(text="Pickup complete!", foreground='green')
+            # Reset status after 3 seconds
+            self.root.after(3000, lambda: self.detection_status_label.config(
+                text="No object detected", foreground='gray'
+            ))
     
     def update_sensitivity_labels(self):
         """Update sensitivity labels"""
@@ -2643,7 +2788,7 @@ class UnifiedControlSystem:
         # Would execute sequence here
 
     def detect_objects(self, frame):
-        """Detect objects in frame and log positions"""
+        """Detect objects in frame and log positions - only within grid area"""
         if self.empty_grid is None:
             return []
 
@@ -2670,17 +2815,54 @@ class UnifiedControlSystem:
                 cx, cy = x + w//2, y + h//2
                 cell = self.find_cell(cx, cy)
 
-                objects.append({
-                    'x': x, 'y': y, 'w': w, 'h': h,
-                    'cx': cx, 'cy': cy,
-                    'area': area,
-                    'cell': cell
-                })
+                # Only include objects that are within a valid grid cell
+                # Disregard objects outside the grid (cell returns '?' or invalid)
+                if cell and cell != '?' and cell[0] in ['A', 'B', 'C', 'D']:
+                    # Check if object spans more than 4 grid cells (only if calibrated)
+                    if self.is_calibrated and len(self.all_points) >= 25:
+                        # Get grid dimensions from calibrated points
+                        # Use the full grid bounds to calculate cell size in the CURRENT frame
+                        all_x = [p[0] for p in self.all_points[:25]]
+                        all_y = [p[1] for p in self.all_points[:25]]
+                        grid_width = max(all_x) - min(all_x)
+                        grid_height = max(all_y) - min(all_y)
+
+                        # Cell size in current frame coordinates
+                        cell_width = grid_width / 4.0
+                        cell_height = grid_height / 4.0
+
+                        # Calculate how many cells the object spans
+                        obj_cells_width = w / cell_width
+                        obj_cells_height = h / cell_height
+                        total_cells_spanned = obj_cells_width * obj_cells_height
+
+                        # Debug logging for first contour
+                        if len(objects) == 0:
+                            self.log(f"Object: {w}x{h}px, cell={cell}, spans {total_cells_spanned:.1f} cells (cell size: {cell_width:.0f}x{cell_height:.0f}px)")
+
+                        # Ignore objects that span more than 4 grid cells
+                        if total_cells_spanned > 4:
+                            self.log(f"Ignoring large object: spans {total_cells_spanned:.1f} cells")
+                            continue
+
+                    objects.append({
+                        'x': x, 'y': y, 'w': w, 'h': h,
+                        'cx': cx, 'cy': cy,
+                        'area': area,
+                        'cell': cell
+                    })
 
         # Log detected objects
         if objects:
-            # Detection status shown in static display, no need to log
-            pass
+            self.log(f"Found {len(objects)} object(s): {[o['cell'] for o in objects]}")
+        elif contours and len(contours) > 0:
+            # Log why no objects were detected
+            largest = max(contours, key=cv2.contourArea)
+            largest_area = cv2.contourArea(largest)
+            x, y, w, h = cv2.boundingRect(largest)
+            cx, cy = x + w//2, y + h//2
+            cell = self.find_cell(cx, cy)
+            self.log(f"No valid objects: largest={largest_area:.0f}px² at {cell} ({cx},{cy})")
 
         return objects
     
