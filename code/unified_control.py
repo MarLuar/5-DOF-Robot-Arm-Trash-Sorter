@@ -448,11 +448,11 @@ class UnifiedControlSystem:
 
     def setup_calibration_tab(self):
         """Setup calibration tab"""
-        # Left: Camera preview
+        # Left: Camera preview (expands to fill available space)
         left_frame = ttk.LabelFrame(self.calib_tab, text="Camera Preview - Click 4 Corners", padding="10")
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        self.calib_canvas = tk.Canvas(left_frame, bg='black', width=1280, height=960, highlightthickness=0)
+        self.calib_canvas = tk.Canvas(left_frame, bg='black', highlightthickness=0)
         self.calib_canvas.pack(fill=tk.BOTH, expand=True)
         self.calib_canvas.bind('<Button-1>', self.on_calib_click)
 
@@ -494,7 +494,7 @@ class UnifiedControlSystem:
         right_container = ttk.Frame(self.calib_tab)
         right_container.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
 
-        # Create canvas with scrollbar for right panel (wider to make camera smaller)
+        # Create canvas with scrollbar for right panel
         right_canvas = tk.Canvas(right_container, width=440, highlightthickness=0)
         scrollbar = ttk.Scrollbar(right_container, orient="vertical", command=right_canvas.yview)
         self.right_panel = ttk.Frame(right_canvas)
@@ -658,6 +658,24 @@ class UnifiedControlSystem:
         # Reset button
         ttk.Button(cam_frame, text="🔄 Reset Defaults",
                   command=self.reset_camera_settings).pack(pady=5, fill=tk.X)
+
+        # Step 3 & 4 Base Values Display
+        step_values_frame = ttk.LabelFrame(self.right_panel, text="🔧 Step 3 & 4 Base Values", padding="5")
+        step_values_frame.pack(fill=tk.X, pady=10)
+
+        ttk.Label(step_values_frame, text="Base angles being sent to Arduino:",
+                 font=('Helvetica', 7), foreground='gray').pack(anchor='w')
+
+        self.step3_base_label = ttk.Label(step_values_frame, text="Step 3 (Pickup): --°",
+                                          font=('Helvetica', 9, 'bold'), foreground='blue')
+        self.step3_base_label.pack(anchor='w', pady=3)
+
+        self.step4_base_label = ttk.Label(step_values_frame, text="Step 4 (Lift): --°",
+                                          font=('Helvetica', 9, 'bold'), foreground='green')
+        self.step4_base_label.pack(anchor='w', pady=3)
+
+        ttk.Label(step_values_frame, text="💡 Values include auto-offset if enabled",
+                 font=('Helvetica', 6), foreground='gray').pack(anchor='w', pady=(3,0))
 
         # Apply initial settings
         self.root.after(1000, self.init_camera_settings)
@@ -2028,14 +2046,22 @@ class UnifiedControlSystem:
                     # Send multi-move command
                     angles = step['angles']
                     # Apply auto-offset to steps 3 and 4 only (indices 2 and 3)
-                    angles = self.apply_offset_to_sequence_step(angles, i, len(self.sequences[seq_name]))
+                    angles_with_offset = self.apply_offset_to_sequence_step(angles, i, len(self.sequences[seq_name]))
 
                     delay = step.get('delay', 1000)
                     step_start = time.time()
 
-                    command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
+                    # Update step 3 & 4 base value display
+                    if i == 2:  # Step 3
+                        self._safe_after(0, lambda a=angles_with_offset[0]: self.step3_base_label.config(
+                            text=f"Step 3 (Pickup): {a:.0f}° (base: {angles[0]:.0f}° + offset: {a-angles[0]:+.0f}°)"))
+                    elif i == 3:  # Step 4
+                        self._safe_after(0, lambda a=angles_with_offset[0]: self.step4_base_label.config(
+                            text=f"Step 4 (Lift): {a:.0f}° (base: {angles[0]:.0f}° + offset: {a-angles[0]:+.0f}°)"))
+
+                    command = f"M {angles_with_offset[0]} {angles_with_offset[1]} {angles_with_offset[2]} {angles_with_offset[3]} {angles_with_offset[4]}\n"
                     self.send_to_arduino(command)
-                    self._safe_after(0, lambda a=angles: self.log(f"  → Sent: {a}"))
+                    self._safe_after(0, lambda a=angles_with_offset: self.log(f"  → Sent: {a}"))
 
                     # Wait for servo movement (minimum 1.0 seconds to let Arduino execute)
                     wait_start = time.time()
@@ -2743,12 +2769,20 @@ class UnifiedControlSystem:
                     break
 
                 if 'angles' in step:
-                    angles = step['angles']
+                    angles_original = step['angles']
                     # Apply auto-offset to steps 3 and 4 only (indices 2 and 3)
-                    angles = self.apply_offset_to_sequence_step(angles, i, len(self.sequences[cell]))
+                    angles = self.apply_offset_to_sequence_step(angles_original, i, len(self.sequences[cell]))
 
                     delay = step.get('delay', 1000)
                     step_start = time.time()
+
+                    # Update step 3 & 4 base value display
+                    if i == 2:  # Step 3
+                        self._safe_after(0, lambda a=angles[0]: self.step3_base_label.config(
+                            text=f"Step 3 (Pickup): {a:.0f}° (base: {angles_original[0]:.0f}° + offset: {a-angles_original[0]:+.0f}°)"))
+                    elif i == 3:  # Step 4
+                        self._safe_after(0, lambda a=angles[0]: self.step4_base_label.config(
+                            text=f"Step 4 (Lift): {a:.0f}° (base: {angles_original[0]:.0f}° + offset: {a-angles_original[0]:+.0f}°)"))
 
                     # Send multi-move command directly
                     command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
