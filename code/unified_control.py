@@ -2155,147 +2155,85 @@ class UnifiedControlSystem:
                         disp_y = int(self.all_points[i][1] * scale) + y_offset
                         cv2.circle(bg, (disp_x, disp_y), 10, corner_colors[i], -1)
 
-            # Object detection - run every 4th frame (~2.5 FPS at 10 FPS camera) for responsive detection
-            # Increased frequency from every 10th frame to reduce flickering
-            self.frame_count += 1
-            if self.detect_in_calib_var.get() and hasattr(self, 'empty_grid') and self.empty_grid is not None:
-                if self.frame_count % 4 == 0:  # Detect every 4th frame (~2.5 Hz)
-                    objects = self.detect_objects(frame)
-                    if objects:
-                        self.last_detection_time = time.time()
-                        detected = max(objects, key=lambda o: o['area'])
-                        detected_cell_name = self.find_cell(detected['cx'], detected['cy'])
-                        detected['cell'] = detected_cell_name
+            # Object detection state is managed by camera thread only
+            # This function only reads shared state for UI updates (buttons, labels)
+            has_detection = hasattr(self, 'last_detected_cell') and self.last_detected_cell is not None
 
-                        # Cell hysteresis - only update confirmed cell after seeing it multiple times
-                        if detected_cell_name == self.cell_confirmed:
-                            # Same cell as before, increment confirmation
-                            self.cell_confirmation_count += 1
-                        else:
-                            # Different cell, check if we should switch
-                            if self.cell_confirmation_count >= self.cell_hysteresis_threshold:
-                                # Switch to new cell after sufficient confirmation
-                                self.cell_confirmed = detected_cell_name
-                                self.cell_confirmation_count = 1
-                                self.log(f"📍 Object detected in {detected_cell_name}")
-                            else:
-                                # Still confirming, keep previous cell
-                                self.cell_confirmation_count += 1
-                                detected['cell'] = self.cell_confirmed if self.cell_confirmed else detected_cell_name
+            # Update UI based on detection state (buttons, labels only - no drawing)
+            if has_detection and time.time() - self.last_detection_time < self.detection_timeout:
+                cell = self.last_detected_cell.get('cell', '?')
 
-                        self.last_detected_cell = detected
-
-                # Use persisted detection for 8 seconds (prevents flickering)
-                # CRITICAL: Keep last_detected_cell even if detection temporarily fails
-                if hasattr(self, 'last_detected_cell') and self.last_detected_cell:
-                    if time.time() - self.last_detection_time < self.detection_timeout:
-                        objects = [self.last_detected_cell]  # Use persisted
-                        # Update cell from confirmed cell for stability
-                        if self.cell_confirmed:
-                            self.last_detected_cell['cell'] = self.cell_confirmed
-                    else:
-                        # Timeout expired - clear detection
-                        self.last_detected_cell = None
-                        self.cell_confirmed = None
-                        self.cell_confirmation_count = 0
-                        objects = []
-                else:
-                    objects = []
-
-                # Track detected objects and enable pickup button
-                self.detected_objects = objects
-
-                # Check if we have persisted detection (even if objects list is empty)
-                has_detection = hasattr(self, 'last_detected_cell') and self.last_detected_cell is not None
-                cell = self.last_detected_cell.get('cell', '?') if has_detection else '?'
-
-                # Auto-offset suggestion analysis (when enabled) - runs independently
-                if self.auto_offset_enabled_var.get() and has_detection:
+                # Auto-offset suggestion analysis (when enabled)
+                if self.auto_offset_enabled_var.get():
                     current_time = time.time()
                     if current_time - self.last_offset_analysis_time > self.offset_analysis_interval:
                         self.root.after(0, self.analyze_offset_suggestion)
                         self.last_offset_analysis_time = current_time
 
-                if has_detection:
-                    # Use the persisted detection
-                    cell = self.last_detected_cell.get('cell', '?')
+                # Check if cell has a sequence and is A, B, or C (not D)
+                if cell in self.sequences and cell[0] in ['A', 'B', 'C']:
+                    self.current_detection_cell = cell
+                    self.pickup_btn.config(state='normal')
 
-                    # Check if cell has a sequence and is A, B, or C (not D)
-                    if cell in self.sequences and cell[0] in ['A', 'B', 'C']:
-                        self.current_detection_cell = cell
-                        self.pickup_btn.config(state='normal')
-
-                        # Auto-pickup logic: wait 2 seconds before triggering
-                        if self.auto_pickup_enabled and self.auto_pickup_running:
-                            # Check if this is the same cell as pending pickup
-                            if self.pending_pickup_cell == cell:
-                                # Check if object has been present for 2 seconds
-                                elapsed = time.time() - self.object_first_detected_time
-                                if elapsed >= self.object_confirmation_delay:
-                                    # Trigger auto pickup!
-                                    self.log(f"[AUTO] Object confirmed in {cell} after {elapsed:.1f}s - Starting pickup!")
-                                    self.auto_pickup_running = False  # Prevent re-triggering
-                                    self.pending_pickup_cell = None
-                                    self.root.after(0, self.auto_trigger_pickup)
-                                else:
-                                    # Still waiting for confirmation
-                                    remaining = self.object_confirmation_delay - elapsed
-                                    self.detection_status_label.config(
-                                        text=f"Auto: {cell} ({remaining:.1f}s)",
-                                        foreground='orange'
-                                    )
-                                    self.update_detection_display(f"{cell} ({remaining:.1f}s)")
+                    # Auto-pickup logic
+                    if self.auto_pickup_enabled and self.auto_pickup_running:
+                        if self.pending_pickup_cell == cell:
+                            elapsed = time.time() - self.object_first_detected_time
+                            if elapsed >= self.object_confirmation_delay:
+                                self.log(f"[AUTO] Object confirmed in {cell} after {elapsed:.1f}s - Starting pickup!")
+                                self.auto_pickup_running = False
+                                self.pending_pickup_cell = None
+                                self.root.after(0, self.auto_trigger_pickup)
                             else:
-                                # New cell detected, reset timer
-                                self.pending_pickup_cell = cell
-                                self.object_first_detected_time = time.time()
-                                self.log(f"[AUTO] Object detected in {cell}, waiting {self.object_confirmation_delay}s confirmation...")
+                                remaining = self.object_confirmation_delay - elapsed
+                                self.detection_status_label.config(
+                                    text=f"Auto: {cell} ({remaining:.1f}s)",
+                                    foreground='orange'
+                                )
+                                self.update_detection_display(f"{cell} ({remaining:.1f}s)")
                         else:
-                            # Manual mode
-                            self.detection_status_label.config(
-                                text=f"Object in {cell} - Ready to pickup!",
-                                foreground='green'
-                            )
-                            self.update_detection_display(cell)
+                            self.pending_pickup_cell = cell
+                            self.object_first_detected_time = time.time()
+                            self.log(f"[AUTO] Object detected in {cell}, waiting confirmation...")
                     else:
-                        # Cell detected but no sequence or invalid row
-                        self.current_detection_cell = None
-                        self.pickup_btn.config(state='disabled')
-                        # Reset auto-pickup if object in wrong cell
-                        if self.auto_pickup_enabled and self.auto_pickup_running:
-                            self.pending_pickup_cell = None
-                            self.object_first_detected_time = 0
-                        if cell[0] in ['A', 'B', 'C']:
-                            self.detection_status_label.config(
-                                text=f"Object in {cell} (no sequence)",
-                                foreground='orange'
-                            )
-                        else:
-                            self.detection_status_label.config(
-                                text=f"Object in {cell} (cell D not supported)",
-                                foreground='orange'
-                            )
-
-                        # Update static display
+                        self.detection_status_label.config(
+                            text=f"Object in {cell} - Ready to pickup!",
+                            foreground='green'
+                        )
                         self.update_detection_display(cell)
                 else:
-                    # No object detected
                     self.current_detection_cell = None
                     self.pickup_btn.config(state='disabled')
-                    # Reset auto-pickup if no object
                     if self.auto_pickup_enabled and self.auto_pickup_running:
                         self.pending_pickup_cell = None
                         self.object_first_detected_time = 0
-                    # Reset cell hysteresis after timeout expires
-                    if self.cell_confirmed and time.time() - self.last_detection_time > self.detection_timeout:
-                        self.cell_confirmed = None
-                        self.cell_confirmation_count = 0
-                    self.detection_status_label.config(
-                        text="No object detected",
-                        foreground='gray'
-                    )
-                    # Update static display
-                    self.update_detection_display(None)
+                    if cell and len(cell) > 0 and cell[0] in ['A', 'B', 'C']:
+                        self.detection_status_label.config(
+                            text=f"Object in {cell} (no sequence)",
+                            foreground='orange'
+                        )
+                    else:
+                        self.detection_status_label.config(
+                            text=f"Object in {cell} (cell D not supported)",
+                            foreground='orange'
+                        )
+                    self.update_detection_display(cell)
+            else:
+                # No object detected or timeout expired
+                self.current_detection_cell = None
+                self.pickup_btn.config(state='disabled')
+                if self.auto_pickup_enabled and self.auto_pickup_running:
+                    self.pending_pickup_cell = None
+                    self.object_first_detected_time = 0
+                # Reset cell hysteresis after timeout expires
+                if self.cell_confirmed and time.time() - self.last_detection_time > self.detection_timeout:
+                    self.cell_confirmed = None
+                    self.cell_confirmation_count = 0
+                self.detection_status_label.config(
+                    text="No object detected",
+                    foreground='gray'
+                )
+                self.update_detection_display(None)
 
             # Convert BGR to RGB
             bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
