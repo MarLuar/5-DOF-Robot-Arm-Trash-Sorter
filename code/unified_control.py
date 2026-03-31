@@ -3276,7 +3276,9 @@ class UnifiedControlSystem:
         objects = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area > self.min_area_var.get():
+
+            # Filter by area (min and max)
+            if area > self.min_area_var.get() and area < 30000:  # Max 30,000px²
                 x, y, w, h = cv2.boundingRect(cnt)
 
                 # Calculate solidity (area / convex_hull_area)
@@ -3311,7 +3313,7 @@ class UnifiedControlSystem:
 
                         # Debug logging for first contour
                         if len(objects) == 0:
-                            self.log(f"Object: {w}x{h}px, area={area:.0f}px², solidity={solidity:.2f}, cell={cell}")
+                            self.log(f"Object: {w}x{h}px, area={area:.0f}px, solidity={solidity:.2f}, cell={cell}")
 
                         # Ignore objects that span more than 4 grid cells
                         if total_cells_spanned > 4:
