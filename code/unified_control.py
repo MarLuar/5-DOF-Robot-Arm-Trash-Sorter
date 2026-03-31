@@ -1576,8 +1576,8 @@ class UnifiedControlSystem:
             # Calculate angular adjustment: object right = decrease angle (negative offset)
             angular_offset = dx / (pixels_per_degree_x * ratio)
 
-        # Clamp to reasonable range
-        angular_offset = max(-10.0, min(10.0, angular_offset))
+        # Clamp to reasonable range (increased from ±10° to ±20° for more sensitivity)
+        angular_offset = max(-20.0, min(20.0, angular_offset))
 
         # Apply offset to base angle only (index 0)
         modified = angles.copy()
@@ -1665,8 +1665,8 @@ class UnifiedControlSystem:
         ratio = self.offset_ratio_var.get()
         suggested_offset = dx / (pixels_per_degree_x * ratio)
 
-        # Clamp to reasonable range
-        suggested_offset = max(-10.0, min(10.0, suggested_offset))
+        # Clamp to reasonable range (increased from ±10° to ±20° for more sensitivity)
+        suggested_offset = max(-20.0, min(20.0, suggested_offset))
 
         # Calculate confidence based on how centered the object is
         cell_width = self.get_cell_width(obj_cell)
