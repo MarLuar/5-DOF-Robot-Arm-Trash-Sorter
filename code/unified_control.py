@@ -133,8 +133,13 @@ class UnifiedControlSystem:
 
         # Detection state persistence (prevents flickering)
         self.last_detection_time = 0
-        self.detection_timeout = 3.0  # Keep detection for 3 seconds
+        self.detection_timeout = 8.0  # Keep detection for 8 seconds (increased from 3s for stability)
         self.last_detected_cell = None
+
+        # Cell hysteresis - prevents cell jumping due to detection noise
+        self.cell_confirmation_count = 0
+        self.cell_confirmed = None
+        self.cell_hysteresis_threshold = 3  # Must see same cell 3 times before switching
 
         # Auto-pickup state tracking
         self.auto_pickup_enabled = False
@@ -2100,26 +2105,49 @@ class UnifiedControlSystem:
                         disp_y = int(self.all_points[i][1] * scale) + y_offset
                         cv2.circle(bg, (disp_x, disp_y), 10, corner_colors[i], -1)
 
-            # Object detection - run every 10th frame (1 FPS) to prevent flickering
-            # Original working implementation from commit 799d242
+            # Object detection - run every 4th frame (~2.5 FPS at 10 FPS camera) for responsive detection
+            # Increased frequency from every 10th frame to reduce flickering
             self.frame_count += 1
             if self.detect_in_calib_var.get() and hasattr(self, 'empty_grid') and self.empty_grid is not None:
-                if self.frame_count % 10 == 0:  # Detect every 10th frame
+                if self.frame_count % 4 == 0:  # Detect every 4th frame (~2.5 Hz)
                     objects = self.detect_objects(frame)
                     if objects:
                         self.last_detection_time = time.time()
-                        self.last_detected_cell = max(objects, key=lambda o: o['area'])
-                        self.last_detected_cell['cell'] = self.find_cell(self.last_detected_cell['cx'], self.last_detected_cell['cy'])
-                        self.log(f"📍 Object detected in {self.last_detected_cell['cell']}")
+                        detected = max(objects, key=lambda o: o['area'])
+                        detected_cell_name = self.find_cell(detected['cx'], detected['cy'])
+                        detected['cell'] = detected_cell_name
 
-                # Use persisted detection for 3 seconds (prevents flickering)
+                        # Cell hysteresis - only update confirmed cell after seeing it multiple times
+                        if detected_cell_name == self.cell_confirmed:
+                            # Same cell as before, increment confirmation
+                            self.cell_confirmation_count += 1
+                        else:
+                            # Different cell, check if we should switch
+                            if self.cell_confirmation_count >= self.cell_hysteresis_threshold:
+                                # Switch to new cell after sufficient confirmation
+                                self.cell_confirmed = detected_cell_name
+                                self.cell_confirmation_count = 1
+                                self.log(f"📍 Object detected in {detected_cell_name}")
+                            else:
+                                # Still confirming, keep previous cell
+                                self.cell_confirmation_count += 1
+                                detected['cell'] = self.cell_confirmed if self.cell_confirmed else detected_cell_name
+
+                        self.last_detected_cell = detected
+
+                # Use persisted detection for 8 seconds (prevents flickering)
                 # CRITICAL: Keep last_detected_cell even if detection temporarily fails
                 if hasattr(self, 'last_detected_cell') and self.last_detected_cell:
                     if time.time() - self.last_detection_time < self.detection_timeout:
                         objects = [self.last_detected_cell]  # Use persisted
+                        # Update cell from confirmed cell for stability
+                        if self.cell_confirmed:
+                            self.last_detected_cell['cell'] = self.cell_confirmed
                     else:
                         # Timeout expired - clear detection
                         self.last_detected_cell = None
+                        self.cell_confirmed = None
+                        self.cell_confirmation_count = 0
                         objects = []
                 else:
                     objects = []
@@ -2208,6 +2236,10 @@ class UnifiedControlSystem:
                     if self.auto_pickup_enabled and self.auto_pickup_running:
                         self.pending_pickup_cell = None
                         self.object_first_detected_time = 0
+                    # Reset cell hysteresis after timeout expires
+                    if self.cell_confirmed and time.time() - self.last_detection_time > self.detection_timeout:
+                        self.cell_confirmed = None
+                        self.cell_confirmation_count = 0
                     self.detection_status_label.config(
                         text="No object detected",
                         foreground='gray'
@@ -2309,6 +2341,11 @@ class UnifiedControlSystem:
         self.pending_pickup_cell = None
         self.auto_pickup_var.set(False)
         self.auto_pickup_chk.config(state='disabled')
+        # Reset detection hysteresis state
+        self.cell_confirmed = None
+        self.cell_confirmation_count = 0
+        self.last_detected_cell = None
+        self.last_detection_time = 0
         self.log("Calibration reset")
     
     def calculate_grid(self):
@@ -2614,6 +2651,11 @@ class UnifiedControlSystem:
         self.detected_objects = []
         self.current_detection_cell = None
         self.pickup_btn.config(state='disabled')
+        # Reset cell hysteresis
+        self.cell_confirmed = None
+        self.cell_confirmation_count = 0
+        self.last_detected_cell = None
+        self.last_detection_time = 0
 
         # Re-enable auto pickup if it was enabled
         if self.auto_pickup_enabled:
