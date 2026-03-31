@@ -135,6 +135,7 @@ class UnifiedControlSystem:
         self.last_detection_time = 0
         self.detection_timeout = 8.0  # Keep detection for 8 seconds (increased from 3s for stability)
         self.last_detected_cell = None
+        self._prev_detection_cell = None  # Track previous cell for sample clearing
 
         # Cell hysteresis - prevents cell jumping due to detection noise
         self.cell_confirmation_count = 0
@@ -1537,16 +1538,43 @@ class UnifiedControlSystem:
 
         exp_cx, exp_cy = expected_center
 
-        # Calculate pixel offset
-        dx = exp_cx - obj_cx  # Positive = object is to the right (need to decrease base angle)
+        # Check if we have valid detection for auto-offset
+        if not hasattr(self, 'last_detected_cell') or not self.last_detected_cell:
+            return angles
 
-        # Convert to angular offset using ratio setting
-        # For every X° of pixel error, adjust base by 1°
-        ratio = self.offset_ratio_var.get()
-        pixels_per_degree_x = 8.0  # Approximate pixels per degree
+        # Calculate offset based on detected position error
+        obj = self.last_detected_cell
+        obj_cell = obj.get('cell', '?')
+        obj_cx = obj.get('cx', 0)
 
-        # Calculate angular adjustment (inverted: right = decrease angle, left = increase)
-        angular_offset = dx / (pixels_per_degree_x * ratio)
+        if obj_cell == '?' or obj_cx == 0:
+            return angles
+
+        # Get expected center
+        expected_center = self.get_cell_center(obj_cell)
+        if not expected_center:
+            return angles
+
+        exp_cx, exp_cy = expected_center
+
+        # Use the AVERAGED suggestion from auto_offset_suggestions for consistency
+        # This ensures the applied offset matches what was shown to the user
+        if hasattr(self, 'auto_offset_suggestions') and len(self.auto_offset_suggestions) > 0:
+            # Calculate average offset from all samples (same as display)
+            avg_offset = sum(s['offset'] for s in self.auto_offset_suggestions) / len(self.auto_offset_suggestions)
+            angular_offset = avg_offset
+            self.log(f"[DEBUG] Applied offset: {angular_offset:+.1f}° (avg of {len(self.auto_offset_suggestions)} samples: {[s['offset'] for s in self.auto_offset_suggestions]})")
+        else:
+            # Fallback: calculate from current detection
+            # Calculate pixel offset
+            dx = exp_cx - obj_cx  # Positive = object is to the right (need to decrease base angle to turn right)
+
+            # Convert to angular offset using ratio setting
+            ratio = self.offset_ratio_var.get()
+            pixels_per_degree_x = 4.0  # Increased sensitivity (was 8.0) - smaller = more sensitive
+
+            # Calculate angular adjustment: object right = decrease angle (negative offset)
+            angular_offset = dx / (pixels_per_degree_x * ratio)
 
         # Clamp to reasonable range
         angular_offset = max(-10.0, min(10.0, angular_offset))
@@ -1625,17 +1653,17 @@ class UnifiedControlSystem:
         exp_cx, exp_cy = expected_center
 
         # Calculate offset from expected center
-        dx = obj_cx - exp_cx  # Positive = object is to the right
+        dx = exp_cx - obj_cx  # Positive = object is to the right (need negative offset to turn right)
         dy = obj_cy - exp_cy  # Positive = object is below
 
-        # Convert pixel offset to angular offset (approximate)
-        # This is calibrated based on typical camera view
-        pixels_per_degree_x = 8.0  # Approximate pixels per degree at typical setup
+        # Convert pixel offset to angular offset (increased sensitivity)
+        pixels_per_degree_x = 4.0  # Increased sensitivity (was 8.0) - smaller = more sensitive
 
-        # Calculate suggested base offset (horizontal adjustment)
-        # If object is right of center (dx > 0), need to rotate base right (positive)
-        # If object is left of center (dx < 0), need to rotate base left (negative)
-        suggested_offset = dx / pixels_per_degree_x
+        # Calculate suggested base offset - THIS IS THE FINAL APPLIED OFFSET (includes ratio)
+        # If object is right of center (dx > 0), need to rotate base right (negative offset = lower angle)
+        # If object is left of center (dx < 0), need to rotate base left (positive offset = higher angle)
+        ratio = self.offset_ratio_var.get()
+        suggested_offset = dx / (pixels_per_degree_x * ratio)
 
         # Clamp to reasonable range
         suggested_offset = max(-10.0, min(10.0, suggested_offset))
@@ -1659,9 +1687,9 @@ class UnifiedControlSystem:
             'timestamp': time.time()
         })
 
-        # Keep only last 5 samples for faster response (was 10)
-        if len(self.auto_offset_suggestions) > 5:
-            self.auto_offset_suggestions = self.auto_offset_suggestions[-5:]
+        # Keep only last 10 samples for better accuracy
+        if len(self.auto_offset_suggestions) > 10:
+            self.auto_offset_suggestions = self.auto_offset_suggestions[-10:]
 
         # Calculate average suggestion
         avg_offset = sum(s['offset'] for s in self.auto_offset_suggestions) / len(self.auto_offset_suggestions)
@@ -1672,7 +1700,8 @@ class UnifiedControlSystem:
             msg = f"✓ Alignment looks good! (offset: {avg_offset:+.1f}°)"
             color = 'green'
         else:
-            direction = "right" if avg_offset > 0 else "left"
+            # For this servo: positive = higher angle = turns LEFT, negative = lower angle = turns RIGHT
+            direction = "left" if avg_offset > 0 else "right"
             msg = f"Suggest: {avg_offset:+.1f}° base ({direction})"
             color = 'blue' if avg_confidence > 0.6 else 'orange'
 
@@ -1680,7 +1709,7 @@ class UnifiedControlSystem:
         if hasattr(self, 'manual_auto_offset_label'):
             self.manual_auto_offset_label.config(text=msg, foreground=color)
 
-        # Update confidence display
+        # Update confidence display with sample count
         conf_text = f"Confidence: {avg_confidence*100:.0f}% ({len(self.auto_offset_suggestions)} samples)"
         if avg_confidence > 0.7:
             conf_color = 'green'
@@ -2060,9 +2089,12 @@ class UnifiedControlSystem:
                         offset = getattr(self, '_last_applied_offset', 0)
                         base_with_offset = angles_with_offset[0]
                         self._safe_after(0, lambda b=base_with_offset, o=offset: self.step3_base_label.config(
-                            text=f"Step 3 (Pickup): {b:.0f}° (base: {angles[0]:.0f}° - offset: {-o:+.0f}°)"))
+                            text=f"Step 3 (Pickup): {b:.0f}° (base: {angles[0]:.0f}° + offset: {o:+.0f}°)"))
                         self._safe_after(0, lambda b=base_with_offset, o=offset: self.step4_base_label.config(
-                            text=f"Step 4 (Lift): {b:.0f}° (base: {angles[0]:.0f}° - offset: {-o:+.0f}°)"))
+                            text=f"Step 4 (Lift): {b:.0f}° (base: {angles[0]:.0f}° + offset: {o:+.0f}°)"))
+
+                    # Debug: Log what's being sent
+                    self.log(f"[DEBUG] Step {i+1}: base={angles[0]:.0f}° + offset={self._last_applied_offset:+.0f}° = {angles_with_offset[0]:.0f}° → Arduino")
 
                     command = f"M {angles_with_offset[0]} {angles_with_offset[1]} {angles_with_offset[2]} {angles_with_offset[3]} {angles_with_offset[4]}\n"
                     self.send_to_arduino(command)
@@ -2284,6 +2316,16 @@ class UnifiedControlSystem:
             if has_detection and time.time() - self.last_detection_time < self.detection_timeout:
                 cell = self.last_detected_cell.get('cell', '?')
 
+                # Check if this is a NEW cell detection (different from previous)
+                prev_cell = getattr(self, '_prev_detection_cell', None)
+                if prev_cell != cell:
+                    # New cell detected - clear old samples and reset hysteresis
+                    self.auto_offset_suggestions = []
+                    self._prev_detection_cell = cell
+                    self.cell_confirmed = None
+                    self.cell_confirmation_count = 0
+                    self.log(f"[AUTO-OFFSET] New cell {cell} detected - cleared samples & reset hysteresis")
+
                 # Auto-offset suggestion analysis (when enabled)
                 if self.auto_offset_enabled_var.get():
                     current_time = time.time()
@@ -2296,26 +2338,37 @@ class UnifiedControlSystem:
                     self.current_detection_cell = cell
                     self.pickup_btn.config(state='normal')
 
-                    # Auto-pickup logic
+                    # Auto-pickup logic - use current averaged offset (no additional sampling wait)
                     if self.auto_pickup_enabled and self.auto_pickup_running:
                         if self.pending_pickup_cell == cell:
                             elapsed = time.time() - self.object_first_detected_time
                             if elapsed >= self.object_confirmation_delay:
+                                # Calculate current averaged offset for logging
+                                avg_offset = 0
+                                if hasattr(self, 'auto_offset_suggestions') and len(self.auto_offset_suggestions) > 0:
+                                    avg_offset = sum(s['offset'] for s in self.auto_offset_suggestions) / len(self.auto_offset_suggestions)
                                 self.log(f"[AUTO] Object confirmed in {cell} after {elapsed:.1f}s - Starting pickup!")
+                                self.log(f"[AUTO] Using averaged offset: {avg_offset:+.1f}° from {len(self.auto_offset_suggestions)} samples")
                                 self.auto_pickup_running = False
                                 self.pending_pickup_cell = None
                                 self.root.after(0, self.auto_trigger_pickup)
                             else:
                                 remaining = self.object_confirmation_delay - elapsed
+                                # Show averaged offset, not _last_applied_offset
+                                avg_offset = 0
+                                if hasattr(self, 'auto_offset_suggestions') and len(self.auto_offset_suggestions) > 0:
+                                    avg_offset = sum(s['offset'] for s in self.auto_offset_suggestions) / len(self.auto_offset_suggestions)
+                                samples = len(self.auto_offset_suggestions)
+                                offset_display = f"{avg_offset:+.0f}°" if samples > 0 else "0°"
                                 self.detection_status_label.config(
-                                    text=f"Auto: {cell} ({remaining:.1f}s)",
+                                    text=f"Auto: {cell} ({remaining:.1f}s) offset:{offset_display}",
                                     foreground='orange'
                                 )
                                 self.update_detection_display(f"{cell} ({remaining:.1f}s)")
                         else:
                             self.pending_pickup_cell = cell
                             self.object_first_detected_time = time.time()
-                            self.log(f"[AUTO] Object detected in {cell}, waiting confirmation...")
+                            self.log(f"[AUTO] Object detected in {cell}, waiting {self.object_confirmation_delay:.0f}s confirmation...")
                     else:
                         self.detection_status_label.config(
                             text=f"Object in {cell} - Ready to pickup!",
@@ -2346,6 +2399,7 @@ class UnifiedControlSystem:
                 if self.auto_pickup_enabled and self.auto_pickup_running:
                     self.pending_pickup_cell = None
                     self.object_first_detected_time = 0
+                    # Keep offset samples - they're still valid for next detection
                 # Reset cell hysteresis after timeout expires
                 if self.cell_confirmed and time.time() - self.last_detection_time > self.detection_timeout:
                     self.cell_confirmed = None
@@ -2425,6 +2479,8 @@ class UnifiedControlSystem:
         self.cell_confirmation_count = 0
         self.last_detected_cell = None
         self.last_detection_time = 0
+        # Reset offset samples
+        self.auto_offset_suggestions = []
         self.log("Calibration reset")
     
     def calculate_grid(self):
@@ -2672,7 +2728,8 @@ class UnifiedControlSystem:
             self.auto_pickup_running = True
             self.pending_pickup_cell = None
             self.object_first_detected_time = 0
-            self.log(f"[AUTO] Auto pickup ENABLED - Will pickup objects after {self.object_confirmation_delay:.0f} second confirmation")
+            # Keep existing offset samples - don't reset!
+            self.log(f"[AUTO] Auto pickup ENABLED - {self.object_confirmation_delay:.0f}s confirmation, using live offset")
             self.detection_status_label.config(
                 text="Auto mode: Waiting for object...",
                 foreground='blue'
@@ -2681,6 +2738,7 @@ class UnifiedControlSystem:
             self.auto_pickup_running = False
             self.pending_pickup_cell = None
             self.object_first_detected_time = 0
+            # Keep offset samples for next enable
             self.log("[AUTO] Auto pickup DISABLED")
             self.detection_status_label.config(
                 text="Manual mode",
@@ -2785,10 +2843,13 @@ class UnifiedControlSystem:
                     if i in [2, 3]:  # Steps 3 or 4
                         offset = getattr(self, '_last_applied_offset', 0)
                         base_with_offset = angles[0]
+                        # Debug: Log what's being sent
+                        self.log(f"[DEBUG] Step {i+1}: base={angles_original[0]:.0f}° + offset={offset:+.0f}° = {base_with_offset:.0f}° → Arduino")
+
                         self._safe_after(0, lambda b=base_with_offset, o=offset: self.step3_base_label.config(
-                            text=f"Step 3 (Pickup): {b:.0f}° (base: {angles_original[0]:.0f}° - offset: {-o:+.0f}°)"))
+                            text=f"Step 3 (Pickup): {b:.0f}° (base: {angles_original[0]:.0f}° + offset: {o:+.0f}°)"))
                         self._safe_after(0, lambda b=base_with_offset, o=offset: self.step4_base_label.config(
-                            text=f"Step 4 (Lift): {b:.0f}° (base: {angles_original[0]:.0f}° - offset: {-o:+.0f}°)"))
+                            text=f"Step 4 (Lift): {b:.0f}° (base: {angles_original[0]:.0f}° + offset: {o:+.0f}°)"))
 
                     # Send multi-move command directly
                     command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
