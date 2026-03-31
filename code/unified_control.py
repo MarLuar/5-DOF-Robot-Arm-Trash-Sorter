@@ -161,6 +161,15 @@ class UnifiedControlSystem:
         self.main_thread_id = threading.current_thread().ident
         self.last_command_time = 0
 
+        # Base offset for grid alignment (compensates for trash between grids)
+        self.base_offset_var = tk.DoubleVar(value=0.0)
+        self.base_offset_enabled = False
+
+        # Auto-offset suggestion state
+        self.auto_offset_suggestions = []  # List of (offset, confidence, reason) tuples
+        self.last_offset_analysis_time = 0
+        self.offset_analysis_interval = 0.5  # Analyze every 0.5 seconds (2 Hz) for fast response
+
         # Load saved camera setting BEFORE UI setup (calibration tab needs it)
         self.load_camera_setting()  # Auto-load saved camera setting
 
@@ -225,9 +234,6 @@ class UnifiedControlSystem:
         self.notebook.add(self.seq_tab, text="Cell Sequences")
         self.setup_sequences_tab()
 
-        # Log panel (shared across all tabs)
-        self.setup_log_panel(main_frame)
-    
     def setup_manual_tab(self):
         """Setup manual control tab"""
         # Left: Servo controls
@@ -271,7 +277,51 @@ class UnifiedControlSystem:
         ttk.Button(preset_frame, text="Rest Position", command=self.go_to_rest).pack(side=tk.LEFT, padx=5)
         ttk.Button(preset_frame, text="Pickup Position", command=self.go_to_pickup).pack(side=tk.LEFT, padx=5)
         ttk.Button(preset_frame, text="Send All (Simultaneous)", command=self.send_all_servos).pack(side=tk.LEFT, padx=5)
-        
+
+        # Camera Configuration (on left side)
+        cam_frame = ttk.LabelFrame(left_frame, text="📷 ZStar Camera Settings", padding="5")
+        cam_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(cam_frame, text="Camera Device:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
+
+        cam_dev_frame = ttk.Frame(cam_frame)
+        cam_dev_frame.pack(fill=tk.X, pady=5)
+
+        self.camera_index_var = tk.StringVar(value="3")
+        self.camera_combo = ttk.Combobox(cam_dev_frame, textvariable=self.camera_index_var, width=12, values=["0", "1", "2", "3", "4", "5", "6", "7"])
+        self.camera_combo.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(cam_dev_frame, text="Find", command=self.find_cameras).pack(side=tk.LEFT, padx=2)
+        ttk.Button(cam_dev_frame, text="Test", command=self.test_camera).pack(side=tk.LEFT, padx=2)
+
+        ttk.Separator(cam_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+
+        ttk.Button(cam_frame, text="Save Camera Setting", command=self.save_camera_setting).pack(fill=tk.X, pady=2)
+        ttk.Button(cam_frame, text="Load Saved Setting", command=self.load_camera_setting).pack(fill=tk.X, pady=2)
+
+        ttk.Separator(cam_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+
+        ttk.Button(cam_frame, text="Set Camera for Calibration", command=self.set_camera_for_calibration, style='Accent.TButton').pack(fill=tk.X, pady=2)
+
+        self.camera_status_label = ttk.Label(cam_frame, text="Status: Not configured", foreground='gray', font=('Helvetica', 8))
+        self.camera_status_label.pack(pady=5)
+
+        # System Log (on left side)
+        log_frame = ttk.LabelFrame(left_frame, text="System Log", padding="5")
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        # Detection status display at top
+        self.detection_display_label = ttk.Label(log_frame, text="Detection Status: No object detected",
+                                                  font=('Helvetica', 9, 'bold'), foreground='gray',
+                                                  relief=tk.SUNKEN, padding=5)
+        self.detection_display_label.pack(fill=tk.X, pady=(0, 5))
+
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=10, width=50, state='disabled')
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+
+        # Floating log window reference
+        self.floating_log_window = None
+
         # Right: Connection, Presets & Speed
         right_frame = ttk.Frame(self.manual_tab)
         right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
@@ -323,6 +373,51 @@ class UnifiedControlSystem:
         ttk.Entry(speed_frame, textvariable=self.speed_var, width=8, justify='center').pack(pady=5)
         ttk.Button(speed_frame, text="Set Speed", command=self.set_speed).pack(pady=5)
 
+        # Base Offset Control (for grid alignment)
+        offset_frame = ttk.LabelFrame(right_frame, text="⚙️ Base Offset (Grid Alignment)", padding="5")
+        offset_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(offset_frame, text="Offset (degrees):", font=('Helvetica', 9, 'bold')).pack(anchor='w')
+        ttk.Label(offset_frame, text="Adjusts base position to catch trash between grids",
+                 font=('Helvetica', 8), foreground='gray').pack(anchor='w')
+
+        offset_control_frame = ttk.Frame(offset_frame)
+        offset_control_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Button(offset_control_frame, text="-5°", width=5,
+                  command=lambda: self.adjust_base_offset(-5)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(offset_control_frame, text="-1°", width=5,
+                  command=lambda: self.adjust_base_offset(-1)).pack(side=tk.LEFT, padx=2)
+
+        self.offset_entry = ttk.Entry(offset_control_frame, textvariable=self.base_offset_var,
+                                      width=8, justify='center')
+        self.offset_entry.pack(side=tk.LEFT, padx=5)
+        self.offset_entry.bind('<Return>', lambda e: self.apply_base_offset())
+
+        ttk.Button(offset_control_frame, text="+1°", width=5,
+                  command=lambda: self.adjust_base_offset(1)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(offset_control_frame, text="+5°", width=5,
+                  command=lambda: self.adjust_base_offset(5)).pack(side=tk.LEFT, padx=2)
+
+        offset_btn_frame = ttk.Frame(offset_frame)
+        offset_btn_frame.pack(fill=tk.X, pady=3)
+
+        ttk.Button(offset_btn_frame, text="Apply Offset", command=self.apply_base_offset,
+                  width=12).pack(side=tk.LEFT, padx=2)
+        ttk.Button(offset_btn_frame, text="Reset (0°)", command=self.reset_base_offset,
+                  width=12).pack(side=tk.LEFT, padx=2)
+
+        self.offset_status_label = ttk.Label(offset_frame, text="Offset: 0.0° (Disabled)",
+                                             foreground='gray', font=('Helvetica', 8))
+        self.offset_status_label.pack(pady=3)
+
+        # Enable/Disable offset
+        self.offset_enabled_var = tk.BooleanVar(value=False)
+        self.offset_check = ttk.Checkbutton(offset_frame, text="Enable Base Offset",
+                                           variable=self.offset_enabled_var,
+                                           command=self.toggle_base_offset_enabled)
+        self.offset_check.pack(pady=2)
+
         # Sequence control
         seq_frame = ttk.LabelFrame(right_frame, text="Sequence Control", padding="5")
         seq_frame.pack(fill=tk.X, pady=5)
@@ -334,34 +429,31 @@ class UnifiedControlSystem:
         ttk.Button(seq_frame, text="Play Selected", command=self.play_sequence).pack(pady=2)
         ttk.Button(seq_frame, text="Stop", command=self.stop_sequence).pack(pady=2)
 
-        # Camera Configuration
-        cam_frame = ttk.LabelFrame(right_frame, text="ZStar Camera Settings", padding="5")
-        cam_frame.pack(fill=tk.X, pady=5)
+        # Auto-Offset Suggestion (Manual Control tab)
+        manual_auto_offset_frame = ttk.LabelFrame(right_frame, text="🤖 Auto-Offset Suggestion", padding="10")
+        manual_auto_offset_frame.pack(fill=tk.X, pady=10)
 
-        ttk.Label(cam_frame, text="Camera Device:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
+        self.manual_auto_offset_label = ttk.Label(manual_auto_offset_frame,
+                                                   text="No suggestion available",
+                                                   font=('Helvetica', 9), foreground='gray')
+        self.manual_auto_offset_label.pack(anchor='w', pady=5)
 
-        cam_dev_frame = ttk.Frame(cam_frame)
-        cam_dev_frame.pack(fill=tk.X, pady=5)
+        self.manual_auto_offset_conf_label = ttk.Label(manual_auto_offset_frame,
+                                                      text="",
+                                                      font=('Helvetica', 8), foreground='gray')
+        self.manual_auto_offset_conf_label.pack(anchor='w', pady=3)
 
-        self.camera_index_var = tk.StringVar(value="3")
-        self.camera_combo = ttk.Combobox(cam_dev_frame, textvariable=self.camera_index_var, width=12, values=["0", "1", "2", "3", "4", "5", "6", "7"])
-        self.camera_combo.pack(side=tk.LEFT, padx=5)
+        manual_auto_btn_frame = ttk.Frame(manual_auto_offset_frame)
+        manual_auto_btn_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Button(cam_dev_frame, text="Find", command=self.find_cameras).pack(side=tk.LEFT, padx=2)
-        ttk.Button(cam_dev_frame, text="Test", command=self.test_camera).pack(side=tk.LEFT, padx=2)
+        ttk.Button(manual_auto_btn_frame, text="✅ Apply Suggestion",
+                  command=self.apply_suggested_offset, width=18).pack(side=tk.LEFT, padx=2)
+        ttk.Button(manual_auto_btn_frame, text="🔄 Analyze Now",
+                  command=self.analyze_offset_suggestion, width=12).pack(side=tk.LEFT, padx=2)
 
-        ttk.Separator(cam_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+        ttk.Label(manual_auto_offset_frame, text="💡 For auto-analysis, enable in Grid Calibration tab",
+                 font=('Helvetica', 8), foreground='blue').pack(anchor='w', pady=(5,0))
 
-        ttk.Button(cam_frame, text="Save Camera Setting", command=self.save_camera_setting).pack(fill=tk.X, pady=2)
-        ttk.Button(cam_frame, text="Load Saved Setting", command=self.load_camera_setting).pack(fill=tk.X, pady=2)
-
-        ttk.Separator(cam_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
-
-        ttk.Button(cam_frame, text="Set Camera for Calibration", command=self.set_camera_for_calibration, style='Accent.TButton').pack(fill=tk.X, pady=2)
-
-        self.camera_status_label = ttk.Label(cam_frame, text="Status: Not configured", foreground='gray', font=('Helvetica', 8))
-        self.camera_status_label.pack(pady=5)
-    
     def setup_calibration_tab(self):
         """Setup calibration tab"""
         # Left: Camera preview
@@ -406,69 +498,118 @@ class UnifiedControlSystem:
         self.detection_status_label = ttk.Label(btn_frame, text="No object detected", foreground='gray')
         self.detection_status_label.pack(side=tk.LEFT, padx=10)
 
-        # Right: Instructions & Sensitivity
+        # Right: Auto-Offset & Sensitivity
         right_frame = ttk.Frame(self.calib_tab)
         right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
 
-        # Instructions
-        instr_frame = ttk.LabelFrame(right_frame, text="Instructions", padding="10")
-        instr_frame.pack(fill=tk.X, pady=5)
+        # Auto-Offset Suggestion Display (prominent position)
+        auto_offset_frame = ttk.LabelFrame(right_frame, text="🤖 Auto-Offset Suggestion", padding="10")
+        auto_offset_frame.pack(fill=tk.X, pady=10)
 
-        instructions = """1. Click 4 grid corners in order:
-   - Top-Left (Red)
-   - Top-Right (Blue)
-   - Bottom-Left (Green)
-   - Bottom-Right (Yellow)
+        ttk.Label(auto_offset_frame, text="Automatically suggests base offset to catch trash between grids",
+                 font=('Helvetica', 8), foreground='blue', wraplength=280).pack(anchor='w', pady=(0, 10))
 
-2. Click "Calculate Grid"
-   - Calculates 25 points
-   - Captures empty grid reference
+        self.auto_offset_suggest_label = ttk.Label(auto_offset_frame,
+                                                   text="No suggestion available",
+                                                   font=('Helvetica', 10, 'bold'), foreground='gray')
+        self.auto_offset_suggest_label.pack(anchor='w', pady=5)
 
-3. Enable "Show Object Detection"
-   - Detects objects in real-time
-   - Shows which cell object is in
-   - Logs position coordinates
+        self.auto_offset_confidence_label = ttk.Label(auto_offset_frame,
+                                                      text="",
+                                                      font=('Helvetica', 9), foreground='gray')
+        self.auto_offset_confidence_label.pack(anchor='w', pady=3)
 
-4. Place object on grid (Cells A-C)
-   - See which cell it's detected in
-   - Yellow boxes show detections
-   - Check System Log for coordinates
+        auto_offset_btn_frame = ttk.Frame(auto_offset_frame)
+        auto_offset_btn_frame.pack(fill=tk.X, pady=5)
 
-5. Click "PICKUP OBJECT" or enable "Auto Pickup"
-   - Manual: Executes sequence for that cell
-   - Auto: Waits 4 seconds, then automatically picks up
-   - Status shows pickup progress
+        ttk.Button(auto_offset_btn_frame, text="✅ Apply Suggestion",
+                  command=self.apply_suggested_offset, width=18).pack(side=tk.LEFT, padx=2)
+        ttk.Button(auto_offset_btn_frame, text="🔄 Analyze Now",
+                  command=self.analyze_offset_suggestion, width=12).pack(side=tk.LEFT, padx=2)
 
-Auto Pickup Mode:
-   - Object must be present for 4 seconds before pickup
-   - Prevents false triggers from brief detections
-   - Click checkbox again to disable auto mode
-"""
-        ttk.Label(instr_frame, text=instructions, justify=tk.LEFT).pack(anchor='w')
+        self.auto_offset_enabled_var = tk.BooleanVar(value=False)
+        self.auto_offset_check = ttk.Checkbutton(auto_offset_frame,
+                                                 text="Enable auto-analysis (every 0.5s)",
+                                                 variable=self.auto_offset_enabled_var,
+                                                 command=self.toggle_auto_offset_suggestions)
+        self.auto_offset_check.pack(pady=5)
 
-        self.corner_label = ttk.Label(instr_frame, text="Corners clicked: 0/4", foreground='blue')
-        self.corner_label.pack(pady=5)
-        
+        ttk.Separator(auto_offset_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+
+        ttk.Label(auto_offset_frame, text="How it works:",
+                 font=('Helvetica', 8, 'bold'), foreground='gray').pack(anchor='w')
+        ttk.Label(auto_offset_frame, text="• Detects object position on grid",
+                 font=('Helvetica', 8), foreground='gray', justify=tk.LEFT).pack(anchor='w')
+        ttk.Label(auto_offset_frame, text="• Compares to expected cell center",
+                 font=('Helvetica', 8), foreground='gray', justify=tk.LEFT).pack(anchor='w')
+        ttk.Label(auto_offset_frame, text="• Calculates offset needed to center",
+                 font=('Helvetica', 8), foreground='gray', justify=tk.LEFT).pack(anchor='w')
+        ttk.Label(auto_offset_frame, text="• Shows confidence based on detection quality",
+                 font=('Helvetica', 8), foreground='gray', justify=tk.LEFT).pack(anchor='w')
+
+        # Base Offset Control (for grid alignment)
+        offset_calib_frame = ttk.LabelFrame(right_frame, text="⚙️ Manual Base Offset", padding="10")
+        offset_calib_frame.pack(fill=tk.X, pady=10)
+
+        ttk.Label(offset_calib_frame, text="Fine-tune base position:",
+                 font=('Helvetica', 9, 'bold')).pack(anchor='w')
+        ttk.Label(offset_calib_frame, text="Use when trash falls between grids",
+                 font=('Helvetica', 8), foreground='gray').pack(anchor='w')
+
+        offset_calib_control = ttk.Frame(offset_calib_frame)
+        offset_calib_control.pack(fill=tk.X, pady=5)
+
+        ttk.Button(offset_calib_control, text="-5°", width=5,
+                  command=lambda: self.adjust_base_offset(-5)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(offset_calib_control, text="-1°", width=5,
+                  command=lambda: self.adjust_base_offset(-1)).pack(side=tk.LEFT, padx=2)
+
+        self.calib_offset_entry = ttk.Entry(offset_calib_control, textvariable=self.base_offset_var,
+                                            width=8, justify='center')
+        self.calib_offset_entry.pack(side=tk.LEFT, padx=5)
+        self.calib_offset_entry.bind('<Return>', lambda e: self.apply_base_offset())
+
+        ttk.Button(offset_calib_control, text="+1°", width=5,
+                  command=lambda: self.adjust_base_offset(1)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(offset_calib_control, text="+5°", width=5,
+                  command=lambda: self.adjust_base_offset(5)).pack(side=tk.LEFT, padx=2)
+
+        offset_calib_btn = ttk.Frame(offset_calib_frame)
+        offset_calib_btn.pack(fill=tk.X, pady=3)
+
+        ttk.Button(offset_calib_btn, text="Apply to Base", command=self.apply_base_offset,
+                  width=12).pack(side=tk.LEFT, padx=2)
+        ttk.Button(offset_calib_btn, text="Reset", command=self.reset_base_offset,
+                  width=12).pack(side=tk.LEFT, padx=2)
+
+        self.calib_offset_status = ttk.Label(offset_calib_frame, text="Current: 0.0° (Disabled)",
+                                             foreground='gray', font=('Helvetica', 8))
+        self.calib_offset_status.pack(pady=3)
+
         # Sensitivity
         sens_frame = ttk.LabelFrame(right_frame, text="Detection Sensitivity", padding="10")
-        sens_frame.pack(fill=tk.X, pady=5)
-        
+        sens_frame.pack(fill=tk.X, pady=10)
+
         ttk.Label(sens_frame, text="Color Threshold:").pack(anchor='w')
         ttk.Scale(sens_frame, from_=10, to=100, variable=self.threshold_var,
                  orient=tk.HORIZONTAL, command=lambda v: self.update_sensitivity_labels()).pack(fill=tk.X)
-        
+
         ttk.Label(sens_frame, text="Minimum Area:").pack(anchor='w', pady=(10,0))
         ttk.Scale(sens_frame, from_=1000, to=10000, variable=self.min_area_var,
                  orient=tk.HORIZONTAL, command=lambda v: self.update_sensitivity_labels()).pack(fill=tk.X)
-        
+
         ttk.Label(sens_frame, text="Min Solidity:").pack(anchor='w', pady=(10,0))
         ttk.Scale(sens_frame, from_=0.1, to=0.9, variable=self.solidity_var,
                  orient=tk.HORIZONTAL, command=lambda v: self.update_sensitivity_labels()).pack(fill=tk.X)
-        
+
         self.sens_label = ttk.Label(sens_frame, text="")
         self.sens_label.pack(pady=5)
         self.update_sensitivity_labels()
-    
+
+        # Corner status (compact)
+        self.corner_label = ttk.Label(right_frame, text="Corners: 0/4 clicked", foreground='blue', font=('Helvetica', 9, 'bold'))
+        self.corner_label.pack(pady=10)
+
     def setup_sequences_tab(self):
         """Setup sequences tab"""
         # Left: Cell list - show ALL sequences (original + _NON variants)
@@ -557,23 +698,6 @@ Auto Pickup Mode:
         ttk.Button(right_frame, text="Set Current as Pickup", command=self.set_current_as_pickup).pack(fill=tk.X, pady=2)
 
         ttk.Button(right_frame, text="Play Sequence", command=self.test_sequence).pack(fill=tk.X, pady=10)
-    
-    def setup_log_panel(self, parent):
-        """Setup shared log panel"""
-        log_frame = ttk.LabelFrame(parent, text="System Log", padding="5")
-        log_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        # Detection status display at top (static)
-        self.detection_display_label = ttk.Label(log_frame, text="Detection Status: No object detected",
-                                                  font=('Helvetica', 10, 'bold'), foreground='gray',
-                                                  relief=tk.SUNKEN, padding=5)
-        self.detection_display_label.pack(fill=tk.X, pady=(0, 5))
-
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=6, width=120, state='disabled')
-        self.log_text.pack(fill=tk.X)
-
-        # Floating log window reference
-        self.floating_log_window = None
 
     def update_detection_display(self, cell=None):
         """Update the static detection status display"""
@@ -1203,6 +1327,9 @@ Auto Pickup Mode:
     def go_to_rest(self):
         """Go to rest position (simultaneous movement)"""
         rest_angles = LEGACY_PRESETS.get('Rest', DEFAULT_REST)
+        # Apply base offset if enabled
+        rest_angles = self.apply_offset_to_angles(rest_angles)
+
         for i, angle in enumerate(rest_angles):
             self.input_boxes[i].set(str(angle))
         if self.is_connected:
@@ -1212,6 +1339,9 @@ Auto Pickup Mode:
     def go_to_pickup(self):
         """Go to pickup position (simultaneous movement)"""
         pickup_angles = LEGACY_PRESETS.get('Pickup', DEFAULT_PICKUP)
+        # Apply base offset if enabled
+        pickup_angles = self.apply_offset_to_angles(pickup_angles)
+
         for i, angle in enumerate(pickup_angles):
             self.input_boxes[i].set(str(angle))
         if self.is_connected:
@@ -1226,6 +1356,8 @@ Auto Pickup Mode:
 
         try:
             angles = [int(self.input_boxes[i].get()) for i in range(5)]
+            # Apply base offset if enabled
+            angles = self.apply_offset_to_angles(angles)
 
             # Validate all angles
             for i, angle in enumerate(angles):
@@ -1262,6 +1394,320 @@ Auto Pickup Mode:
 
         self.log(f"Pasted to Manual Control: {angles}")
         messagebox.showinfo("Pasted!", f"Angles pasted to Manual Control:\n{angles}\n\nClick 'Send' on any servo to move to this position")
+
+    # Base Offset Methods (for grid alignment)
+    def adjust_base_offset(self, amount):
+        """Adjust base offset by amount"""
+        current = self.base_offset_var.get()
+        new_offset = current + amount
+        # Clamp to reasonable range (-15 to +15 degrees)
+        new_offset = max(-15.0, min(15.0, new_offset))
+        self.base_offset_var.set(new_offset)
+        self.update_offset_display()
+        self.log(f"Base offset adjusted: {new_offset:+.1f}°")
+
+    def apply_base_offset(self):
+        """Apply base offset to current base position"""
+        try:
+            offset = self.base_offset_var.get()
+            if not self.is_connected:
+                self.log(f"Base offset set to {offset:+.1f}° (will apply when connected)")
+                self.update_offset_display()
+                return
+
+            # Get current base angle
+            current_base = int(self.input_boxes[0].get())
+            # Apply offset
+            new_base = int(current_base + offset)
+            # Validate range
+            new_base = max(0, min(180, new_base))
+
+            # Update input box
+            self.input_boxes[0].set(str(new_base))
+
+            # Send to Arduino
+            self.send_servo(0)
+
+            self.log(f"Base offset applied: {current_base}° → {new_base}° (offset: {offset:+.1f}°)")
+            self.update_offset_display()
+        except Exception as e:
+            self.log(f"Error applying offset: {e}")
+
+    def reset_base_offset(self):
+        """Reset base offset to zero"""
+        self.base_offset_var.set(0.0)
+        self.update_offset_display()
+        self.log("Base offset reset to 0.0°")
+
+    def toggle_base_offset_enabled(self):
+        """Enable or disable base offset application"""
+        self.base_offset_enabled = self.offset_enabled_var.get()
+        if self.base_offset_enabled:
+            self.log(f"Base offset ENABLED: {self.base_offset_var.get():+.1f}°")
+            self.offset_status_label.config(text=f"Offset: {self.base_offset_var.get():+.1f}° (Active)",
+                                           foreground='green')
+            if hasattr(self, 'calib_offset_status'):
+                self.calib_offset_status.config(text=f"Current: {self.base_offset_var.get():+.1f}° (Active)",
+                                               foreground='green')
+        else:
+            self.log("Base offset DISABLED")
+            self.update_offset_display()
+
+    def update_offset_display(self):
+        """Update offset status labels"""
+        offset = self.base_offset_var.get()
+        if self.base_offset_enabled:
+            self.offset_status_label.config(text=f"Offset: {offset:+.1f}° (Active)",
+                                           foreground='green')
+            if hasattr(self, 'calib_offset_status'):
+                self.calib_offset_status.config(text=f"Current: {offset:+.1f}° (Active)",
+                                               foreground='green')
+        else:
+            self.offset_status_label.config(text=f"Offset: {offset:+.1f}° (Disabled)",
+                                           foreground='gray')
+            if hasattr(self, 'calib_offset_status'):
+                self.calib_offset_status.config(text=f"Current: {offset:+.1f}° (Disabled)",
+                                               foreground='gray')
+
+    def apply_offset_to_angles(self, angles):
+        """Apply base offset to a set of servo angles if enabled"""
+        if not self.base_offset_enabled:
+            return angles
+
+        offset = self.base_offset_var.get()
+        if offset == 0.0:
+            return angles
+
+        # Apply offset to base angle only (index 0)
+        modified = angles.copy()
+        new_base = int(modified[0] + offset)
+        # Clamp to valid range
+        new_base = max(0, min(180, new_base))
+        modified[0] = new_base
+
+        return modified
+
+    # Auto-Offset Suggestion Methods
+    def toggle_auto_offset_suggestions(self):
+        """Enable or disable auto-offset suggestions"""
+        enabled = self.auto_offset_enabled_var.get()
+        if enabled:
+            self.log("Auto-offset suggestions ENABLED")
+            self.analyze_offset_suggestion()
+        else:
+            self.log("Auto-offset suggestions DISABLED")
+            self.auto_offset_suggest_label.config(text="No suggestion available", foreground='gray')
+            self.auto_offset_confidence_label.config(text="")
+
+    def analyze_offset_suggestion(self):
+        """Analyze detected object positions and suggest base offset"""
+        if not self.auto_offset_enabled_var.get():
+            # Still allow manual analysis from Manual tab
+            pass
+
+        if not self.is_calibrated or len(self.all_points) < 25:
+            msg = "Grid not calibrated - cannot analyze"
+            self.auto_offset_suggest_label.config(text=msg, foreground='orange')
+            if hasattr(self, 'manual_auto_offset_label'):
+                self.manual_auto_offset_label.config(text=msg, foreground='orange')
+            return
+
+        if not hasattr(self, 'last_detected_cell') or not self.last_detected_cell:
+            msg = "No object detected - place trash on grid"
+            self.auto_offset_suggest_label.config(text=msg, foreground='gray')
+            self.auto_offset_confidence_label.config(text="")
+            if hasattr(self, 'manual_auto_offset_label'):
+                self.manual_auto_offset_label.config(text=msg, foreground='gray')
+                self.manual_auto_offset_conf_label.config(text="")
+            return
+
+        # Get object info
+        obj = self.last_detected_cell
+        obj_cx, obj_cy = obj.get('cx', 0), obj.get('cy', 0)
+        obj_cell = obj.get('cell', '?')
+        obj_w, obj_h = obj.get('w', 0), obj.get('h', 0)
+
+        if obj_cell == '?' or obj_cx == 0:
+            msg = "Object position uncertain"
+            self.auto_offset_suggest_label.config(text=msg, foreground='orange')
+            if hasattr(self, 'manual_auto_offset_label'):
+                self.manual_auto_offset_label.config(text=msg, foreground='orange')
+            return
+
+        # Calculate expected cell center from calibrated grid
+        expected_center = self.get_cell_center(obj_cell)
+        if not expected_center:
+            self.auto_offset_suggest_label.config(
+                text=f"Cannot calculate center for {obj_cell}",
+                foreground='orange'
+            )
+            return
+
+        exp_cx, exp_cy = expected_center
+
+        # Calculate offset from expected center
+        dx = obj_cx - exp_cx  # Positive = object is to the right
+        dy = obj_cy - exp_cy  # Positive = object is below
+
+        # Convert pixel offset to angular offset (approximate)
+        # This is calibrated based on typical camera view
+        pixels_per_degree_x = 8.0  # Approximate pixels per degree at typical setup
+
+        # Calculate suggested base offset (horizontal adjustment)
+        # If object is right of center (dx > 0), need to rotate base right (positive)
+        # If object is left of center (dx < 0), need to rotate base left (negative)
+        suggested_offset = dx / pixels_per_degree_x
+
+        # Clamp to reasonable range
+        suggested_offset = max(-10.0, min(10.0, suggested_offset))
+
+        # Calculate confidence based on how centered the object is
+        cell_width = self.get_cell_width(obj_cell)
+        if cell_width and cell_width > 0:
+            # How far from center as fraction of cell width
+            normalized_offset = abs(dx) / (cell_width / 2)
+            confidence = max(0, 1.0 - normalized_offset)
+        else:
+            confidence = 0.5
+
+        # Store suggestion
+        self.auto_offset_suggestions.append({
+            'offset': suggested_offset,
+            'confidence': confidence,
+            'cell': obj_cell,
+            'dx': dx,
+            'dy': dy,
+            'timestamp': time.time()
+        })
+
+        # Keep only last 5 samples for faster response (was 10)
+        if len(self.auto_offset_suggestions) > 5:
+            self.auto_offset_suggestions = self.auto_offset_suggestions[-5:]
+
+        # Calculate average suggestion
+        avg_offset = sum(s['offset'] for s in self.auto_offset_suggestions) / len(self.auto_offset_suggestions)
+        avg_confidence = sum(s['confidence'] for s in self.auto_offset_suggestions) / len(self.auto_offset_suggestions)
+
+        # Update UI (both Calibration and Manual tabs)
+        if abs(avg_offset) < 0.5:
+            msg = f"✓ Alignment looks good! (offset: {avg_offset:+.1f}°)"
+            color = 'green'
+        else:
+            direction = "right" if avg_offset > 0 else "left"
+            msg = f"Suggest: {avg_offset:+.1f}° base ({direction})"
+            color = 'blue' if avg_confidence > 0.6 else 'orange'
+
+        self.auto_offset_suggest_label.config(text=msg, foreground=color)
+        if hasattr(self, 'manual_auto_offset_label'):
+            self.manual_auto_offset_label.config(text=msg, foreground=color)
+
+        # Update confidence display
+        conf_text = f"Confidence: {avg_confidence*100:.0f}% ({len(self.auto_offset_suggestions)} samples)"
+        if avg_confidence > 0.7:
+            conf_color = 'green'
+        elif avg_confidence > 0.4:
+            conf_color = 'orange'
+        else:
+            conf_color = 'gray'
+        self.auto_offset_confidence_label.config(text=conf_text, foreground=conf_color)
+        if hasattr(self, 'manual_auto_offset_conf_label'):
+            self.manual_auto_offset_conf_label.config(text=conf_text, foreground=conf_color)
+
+        self.log(f"Auto-offset: {avg_offset:+.1f}° (confidence: {avg_confidence*100:.0f}%, {len(self.auto_offset_suggestions)} samples)")
+
+    def get_cell_center(self, cell):
+        """Get the expected center coordinates of a cell"""
+        if not self.is_calibrated or len(self.all_points) < 25:
+            return None
+
+        try:
+            row = ord(cell[0]) - ord('A')
+            col = int(cell[1]) - 1
+
+            if not (0 <= row < 4 and 0 <= col < 4):
+                return None
+
+            # Get 4 corners of the cell
+            idx1 = row * 5 + col
+            idx2 = idx1 + 1
+            idx3 = idx1 + 5
+            idx4 = idx3 + 1
+
+            if idx4 >= len(self.all_points):
+                return None
+
+            # Calculate center as average of 4 corners
+            x1, y1 = self.all_points[idx1]
+            x2, y2 = self.all_points[idx2]
+            x3, y3 = self.all_points[idx3]
+            x4, y4 = self.all_points[idx4]
+
+            center_x = (x1 + x2 + x3 + x4) / 4
+            center_y = (y1 + y2 + y3 + y4) / 4
+
+            return (center_x, center_y)
+        except:
+            return None
+
+    def get_cell_width(self, cell):
+        """Get the approximate width of a cell in pixels"""
+        if not self.is_calibrated or len(self.all_points) < 25:
+            return None
+
+        try:
+            row = ord(cell[0]) - ord('A')
+            col = int(cell[1]) - 1
+
+            if not (0 <= row < 4 and 0 <= col < 4):
+                return None
+
+            # Get left and right edge points
+            idx_left = row * 5 + col
+            idx_right = idx_left + 1
+
+            if idx_right >= len(self.all_points):
+                return None
+
+            x_left = self.all_points[idx_left][0]
+            x_right = self.all_points[idx_right][0]
+
+            return abs(x_right - x_left)
+        except:
+            return None
+
+    def apply_suggested_offset(self):
+        """Apply the currently suggested offset"""
+        if not self.auto_offset_suggestions:
+            messagebox.showwarning("Warning", "No suggestion available to apply")
+            return
+
+        # Calculate average suggestion
+        avg_offset = sum(s['offset'] for s in self.auto_offset_suggestions) / len(self.auto_offset_suggestions)
+        avg_confidence = sum(s['confidence'] for s in self.auto_offset_suggestions) / len(self.auto_offset_suggestions)
+
+        if avg_confidence < 0.3:
+            confirm = messagebox.askyesno(
+                "Low Confidence",
+                f"The suggestion has low confidence ({avg_confidence*100:.0f}%).\n\n"
+                f"Suggested offset: {avg_offset:+.1f}°\n\n"
+                f"Apply anyway?"
+            )
+            if not confirm:
+                return
+
+        # Apply the offset
+        self.base_offset_var.set(avg_offset)
+        self.base_offset_enabled = True
+        self.offset_enabled_var.set(True)
+        self.update_offset_display()
+
+        self.log(f"Applied suggested offset: {avg_offset:+.1f}° (confidence: {avg_confidence*100:.0f}%)")
+        messagebox.showinfo(
+            "Offset Applied",
+            f"Applied offset: {avg_offset:+.1f}°\n"
+            f"Confidence: {avg_confidence*100:.0f}%\n\n"
+            f"The base offset is now enabled and will be applied to all movements."
+        )
 
     def send_to_arduino(self, command):
         """Send command to Arduino with proper buffer management"""
@@ -1483,6 +1929,9 @@ Auto Pickup Mode:
                 if 'angles' in step:
                     # Send multi-move command
                     angles = step['angles']
+                    # Apply base offset if enabled
+                    angles = self.apply_offset_to_angles(angles)
+
                     delay = step.get('delay', 1000)
                     step_start = time.time()
 
@@ -1632,9 +2081,9 @@ Auto Pickup Mode:
                     cv2.putText(bg, corner_names[i], (disp_x+20, disp_y-20),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, corner_colors[i], 2)
 
-            # If calibrated, draw grid overlay on every frame - scaled
+            # If calibrated, draw grid overlay on every frame - scaled (THICK lines)
             if self.is_calibrated and len(self.all_points) >= 25:
-                # Draw grid lines - scale all_points to display coordinates
+                # Draw grid lines - scale all_points to display coordinates (THICK: 2px)
                 for row in range(5):
                     idx1 = row * 5
                     idx2 = idx1 + 4
@@ -1664,49 +2113,48 @@ Auto Pickup Mode:
                         disp_y = int(self.all_points[i][1] * scale) + y_offset
                         cv2.circle(bg, (disp_x, disp_y), 10, corner_colors[i], -1)
 
-            # DETECTION FLICKERING FIX:
-            # - Added detection persistence (3 second timeout)
-            # - Object stays detected for 3 seconds after last detection
-            # - Prevents flickering when object detection is inconsistent
-            # - last_detected_cell persists between frames
-            # - Detection only updates every 5th frame (2 FPS)
-            # - Between detections, uses persisted detection
-
+            # Object detection - run every 10th frame (1 FPS) to prevent flickering
+            # Original working implementation from commit 799d242
             self.frame_count += 1
             if self.detect_in_calib_var.get() and hasattr(self, 'empty_grid') and self.empty_grid is not None:
-                # Only run detection every 5th frame (2 FPS)
-                if self.frame_count % 5 == 0:
+                if self.frame_count % 10 == 0:  # Detect every 10th frame
                     objects = self.detect_objects(frame)
                     if objects:
-                        # New detection found - update and reset timer
                         self.last_detection_time = time.time()
                         self.last_detected_cell = max(objects, key=lambda o: o['area'])
                         self.last_detected_cell['cell'] = self.find_cell(self.last_detected_cell['cx'], self.last_detected_cell['cy'])
-                    # If no objects detected, keep using persisted last_detected_cell if still within timeout
-                    # This prevents flickering when detection momentarily fails
-                else:
-                    # Use persisted detection (prevents flickering)
-                    objects = []
+                        self.log(f"📍 Object detected in {self.last_detected_cell['cell']}")
 
-                # Apply persistence: use last_detected_cell if within timeout
+                # Use persisted detection for 3 seconds (prevents flickering)
+                # CRITICAL: Keep last_detected_cell even if detection temporarily fails
                 if hasattr(self, 'last_detected_cell') and self.last_detected_cell:
-                    if time.time() - self.last_detection_time < 3.0:
-                        # Still within persistence window - use last known detection
-                        objects = [self.last_detected_cell]
-                        cell = self.last_detected_cell.get('cell', '?')
+                    if time.time() - self.last_detection_time < self.detection_timeout:
+                        objects = [self.last_detected_cell]  # Use persisted
                     else:
                         # Timeout expired - clear detection
-                        objects = []
                         self.last_detected_cell = None
-                        cell = '?'
+                        objects = []
                 else:
-                    cell = '?'
+                    objects = []
 
                 # Track detected objects and enable pickup button
                 self.detected_objects = objects
 
-                # Check if we have a valid cell detection (from persisted or current detection)
-                if cell and cell != '?' and self.last_detected_cell:
+                # Check if we have persisted detection (even if objects list is empty)
+                has_detection = hasattr(self, 'last_detected_cell') and self.last_detected_cell is not None
+                cell = self.last_detected_cell.get('cell', '?') if has_detection else '?'
+
+                # Auto-offset suggestion analysis (when enabled) - runs independently
+                if self.auto_offset_enabled_var.get() and has_detection:
+                    current_time = time.time()
+                    if current_time - self.last_offset_analysis_time > self.offset_analysis_interval:
+                        self.root.after(0, self.analyze_offset_suggestion)
+                        self.last_offset_analysis_time = current_time
+
+                if has_detection:
+                    # Use the persisted detection
+                    cell = self.last_detected_cell.get('cell', '?')
+
                     # Check if cell has a sequence and is A, B, or C (not D)
                     if cell in self.sequences and cell[0] in ['A', 'B', 'C']:
                         self.current_detection_cell = cell
@@ -1762,6 +2210,7 @@ Auto Pickup Mode:
                                 text=f"Object in {cell} (cell D not supported)",
                                 foreground='orange'
                             )
+
                         # Update static display
                         self.update_detection_display(cell)
                 else:
@@ -1779,21 +2228,37 @@ Auto Pickup Mode:
                     # Update static display
                     self.update_detection_display(None)
 
-                # Draw detection boxes on camera feed
-                for obj in objects:
+                # Draw detection boxes on camera feed (when we have persisted detection)
+                # Draw whenever last_detected_cell exists, not just when objects list is populated
+                if has_detection:
+                    obj = self.last_detected_cell
                     # Scale detection coordinates to display coordinates
                     disp_x = int(obj['x'] * scale) + x_offset
                     disp_y = int(obj['y'] * scale) + y_offset
                     disp_w = int(obj['w'] * scale)
                     disp_h = int(obj['h'] * scale)
 
-                    # Draw detection box
+                    # Draw detection box (yellow, THICK: 2px)
                     cv2.rectangle(bg, (disp_x, disp_y), (disp_x+disp_w, disp_y+disp_h), (0, 255, 255), 2)
 
                     # Get cell name
-                    cell = self.find_cell(obj['cx'], obj['cy'])
+                    cell = obj.get('cell', '?')
                     cv2.putText(bg, f"Object: {cell}", (disp_x, disp_y-10),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+                    # Draw cell center marker (red crosshair, THICK: 2px) - shows expected position
+                    if self.is_calibrated and len(self.all_points) >= 25:
+                        expected_center = self.get_cell_center(cell)
+                        if expected_center:
+                            exp_cx = int(expected_center[0] * scale) + x_offset
+                            exp_cy = int(expected_center[1] * scale) + y_offset
+                            # Draw crosshair at expected center (red, THICK: 2px)
+                            cv2.line(bg, (exp_cx-10, exp_cy), (exp_cx+10, exp_cy), (255, 0, 0), 2)
+                            cv2.line(bg, (exp_cx, exp_cy-10), (exp_cx, exp_cy+10), (255, 0, 0), 2)
+                            # Draw line from object center to expected center (blue, 1px)
+                            obj_cx = int(obj['cx'] * scale) + x_offset
+                            obj_cy = int(obj['cy'] * scale) + y_offset
+                            cv2.line(bg, (obj_cx, obj_cy), (exp_cx, exp_cy), (255, 0, 0), 1)
 
             # Convert BGR to RGB
             bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
@@ -2104,6 +2569,9 @@ Auto Pickup Mode:
 
                 if 'angles' in step:
                     angles = step['angles']
+                    # Apply base offset if enabled
+                    angles = self.apply_offset_to_angles(angles)
+
                     delay = step.get('delay', 1000)
                     step_start = time.time()
 
