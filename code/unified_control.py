@@ -1826,6 +1826,56 @@ class UnifiedControlSystem:
                         pt2_y = int(self.all_points[idx2][1] * scale) + y_offset
                         cv2.line(bg, (pt1_x, pt1_y), (pt2_x, pt2_y), (0, 255, 0), 2)
 
+            # Object detection - run every 4th frame (~2.5 FPS at 10 FPS camera)
+            # Draw detection box in camera thread to prevent flickering
+            self.frame_count += 1
+            if self.detect_in_calib_var.get() and hasattr(self, 'empty_grid') and self.empty_grid is not None:
+                if self.frame_count % 4 == 0:  # Detect every 4th frame (~2.5 Hz)
+                    objects = self.detect_objects(frame)
+                    if objects:
+                        self.last_detection_time = time.time()
+                        detected = max(objects, key=lambda o: o['area'])
+                        detected_cell_name = self.find_cell(detected['cx'], detected['cy'])
+                        detected['cell'] = detected_cell_name
+
+                        # Cell hysteresis - only update confirmed cell after seeing it multiple times
+                        if detected_cell_name == self.cell_confirmed:
+                            self.cell_confirmation_count += 1
+                        else:
+                            if self.cell_confirmation_count >= self.cell_hysteresis_threshold:
+                                self.cell_confirmed = detected_cell_name
+                                self.cell_confirmation_count = 1
+                                self.log(f"📍 Object detected in {detected_cell_name}")
+                            else:
+                                self.cell_confirmation_count += 1
+                                detected['cell'] = self.cell_confirmed if self.cell_confirmed else detected_cell_name
+
+                        self.last_detected_cell = detected
+
+                # Use persisted detection for 8 seconds (prevents flickering)
+                has_detection = hasattr(self, 'last_detected_cell') and self.last_detected_cell is not None
+                if has_detection and time.time() - self.last_detection_time < self.detection_timeout:
+                    obj = self.last_detected_cell
+                    # Scale detection coordinates to display coordinates
+                    disp_x = int(obj['x'] * scale) + x_offset
+                    disp_y = int(obj['y'] * scale) + y_offset
+                    disp_w = int(obj['w'] * scale)
+                    disp_h = int(obj['h'] * scale)
+
+                    # Draw detection box (yellow, THICK: 2px)
+                    cv2.rectangle(bg, (disp_x, disp_y), (disp_x+disp_w, disp_y+disp_h), (0, 255, 255), 2)
+
+                    # Get detection info
+                    cell = obj.get('cell', '?')
+                    area = obj.get('area', 0)
+                    solidity = obj.get('solidity', 0)
+                    threshold = self.threshold_var.get()
+
+                    # Draw info box with area, solidity, and threshold
+                    info_text = f"{cell} | {area:.0f}px² | S:{solidity:.2f} | Th:{threshold}"
+                    cv2.putText(bg, info_text, (disp_x, disp_y-10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+
             # Convert BGR to RGB
             bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
 
@@ -2246,38 +2296,6 @@ class UnifiedControlSystem:
                     )
                     # Update static display
                     self.update_detection_display(None)
-
-                # Draw detection boxes on camera feed (when we have persisted detection)
-                # Draw whenever last_detected_cell exists, not just when objects list is populated
-                if has_detection:
-                    obj = self.last_detected_cell
-                    # Scale detection coordinates to display coordinates
-                    disp_x = int(obj['x'] * scale) + x_offset
-                    disp_y = int(obj['y'] * scale) + y_offset
-                    disp_w = int(obj['w'] * scale)
-                    disp_h = int(obj['h'] * scale)
-
-                    # Draw detection box (yellow, THICK: 2px)
-                    cv2.rectangle(bg, (disp_x, disp_y), (disp_x+disp_w, disp_y+disp_h), (0, 255, 255), 2)
-
-                    # Get cell name
-                    cell = obj.get('cell', '?')
-                    cv2.putText(bg, f"Object: {cell}", (disp_x, disp_y-10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-                    # Draw cell center marker (red crosshair, THICK: 2px) - shows expected position
-                    if self.is_calibrated and len(self.all_points) >= 25:
-                        expected_center = self.get_cell_center(cell)
-                        if expected_center:
-                            exp_cx = int(expected_center[0] * scale) + x_offset
-                            exp_cy = int(expected_center[1] * scale) + y_offset
-                            # Draw crosshair at expected center (red, THICK: 2px)
-                            cv2.line(bg, (exp_cx-10, exp_cy), (exp_cx+10, exp_cy), (255, 0, 0), 2)
-                            cv2.line(bg, (exp_cx, exp_cy-10), (exp_cx, exp_cy+10), (255, 0, 0), 2)
-                            # Draw line from object center to expected center (blue, 1px)
-                            obj_cx = int(obj['cx'] * scale) + x_offset
-                            obj_cy = int(obj['cy'] * scale) + y_offset
-                            cv2.line(bg, (obj_cx, obj_cy), (exp_cx, exp_cy), (255, 0, 0), 1)
 
             # Convert BGR to RGB
             bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
@@ -3321,6 +3339,11 @@ class UnifiedControlSystem:
             if area > self.min_area_var.get():
                 x, y, w, h = cv2.boundingRect(cnt)
 
+                # Calculate solidity (area / convex_hull_area)
+                hull = cv2.convexHull(cnt)
+                hull_area = cv2.contourArea(hull)
+                solidity = float(area) / hull_area if hull_area > 0 else 0
+
                 # Find cell
                 cx, cy = x + w//2, y + h//2
                 cell = self.find_cell(cx, cy)
@@ -3348,7 +3371,7 @@ class UnifiedControlSystem:
 
                         # Debug logging for first contour
                         if len(objects) == 0:
-                            self.log(f"Object: {w}x{h}px, cell={cell}, spans {total_cells_spanned:.1f} cells (cell size: {cell_width:.0f}x{cell_height:.0f}px)")
+                            self.log(f"Object: {w}x{h}px, area={area:.0f}px², solidity={solidity:.2f}, cell={cell}")
 
                         # Ignore objects that span more than 4 grid cells
                         if total_cells_spanned > 4:
@@ -3359,6 +3382,7 @@ class UnifiedControlSystem:
                         'x': x, 'y': y, 'w': w, 'h': h,
                         'cx': cx, 'cy': cy,
                         'area': area,
+                        'solidity': solidity,
                         'cell': cell
                     })
 
