@@ -2240,11 +2240,13 @@ class UnifiedControlSystem:
             img = Image.fromarray(bg)
             photo = ImageTk.PhotoImage(image=img)
 
-            self.calib_canvas.delete("all")
-            self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
-            self.calib_canvas.image = photo
+            # DO NOT update canvas here - camera thread handles all canvas updates
+            # This function only handles UI state (buttons, labels)
+            # self.calib_canvas.delete("all")  # REMOVED - causes flickering!
+            # self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
+            # self.calib_canvas.image = photo
 
-            self.calib_canvas.after(500, self.update_calib_preview)  # 2 FPS for maximum performance
+            self.calib_canvas.after(500, self.update_calib_preview)  # 2 FPS for UI updates
         except Exception as e:
             self.log(f"Preview error: {e}")
             self.calib_canvas.after(1000, self.update_calib_preview)
