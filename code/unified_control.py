@@ -1871,10 +1871,10 @@ class UnifiedControlSystem:
                     solidity = obj.get('solidity', 0)
                     threshold = self.threshold_var.get()
 
-                    # Draw info box with area, solidity, and threshold
-                    info_text = f"{cell} | {area:.0f}px² | S:{solidity:.2f} | Th:{threshold}"
+                    # Draw info box with area, solidity, and threshold (BOLD text, thickness=2)
+                    info_text = f"{cell} | {area:.0f}px | S:{solidity:.2f} | Th:{threshold}"
                     cv2.putText(bg, info_text, (disp_x, disp_y-10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
             # Convert BGR to RGB
             bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
