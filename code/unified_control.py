@@ -161,14 +161,12 @@ class UnifiedControlSystem:
         self.main_thread_id = threading.current_thread().ident
         self.last_command_time = 0
 
-        # Base offset for grid alignment (compensates for trash between grids)
-        self.base_offset_var = tk.DoubleVar(value=0.0)
-        self.base_offset_enabled = False
-
-        # Auto-offset suggestion state
+        # Auto-offset ratio setting (compensates for trash between grids)
+        self.offset_ratio_var = tk.DoubleVar(value=2.0)  # For every 2° error, adjust 1°
         self.auto_offset_suggestions = []  # List of (offset, confidence, reason) tuples
         self.last_offset_analysis_time = 0
         self.offset_analysis_interval = 0.5  # Analyze every 0.5 seconds (2 Hz) for fast response
+        self.auto_offset_enabled_var = tk.BooleanVar(value=False)  # Enable auto-analysis
 
         # Load saved camera setting BEFORE UI setup (calibration tab needs it)
         self.load_camera_setting()  # Auto-load saved camera setting
@@ -373,50 +371,39 @@ class UnifiedControlSystem:
         ttk.Entry(speed_frame, textvariable=self.speed_var, width=8, justify='center').pack(pady=5)
         ttk.Button(speed_frame, text="Set Speed", command=self.set_speed).pack(pady=5)
 
-        # Base Offset Control (for grid alignment)
-        offset_frame = ttk.LabelFrame(right_frame, text="⚙️ Base Offset (Grid Alignment)", padding="5")
-        offset_frame.pack(fill=tk.X, pady=5)
+        # Auto-Offset Ratio Setting (for grid alignment)
+        offset_ratio_frame = ttk.LabelFrame(right_frame, text="🤖 Auto-Offset Ratio", padding="5")
+        offset_ratio_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Label(offset_frame, text="Offset (degrees):", font=('Helvetica', 9, 'bold')).pack(anchor='w')
-        ttk.Label(offset_frame, text="Adjusts base position to catch trash between grids",
+        ttk.Label(offset_ratio_frame, text="Adjustment sensitivity:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
+        ttk.Label(offset_ratio_frame, text="For every X° detected error, adjust base by 1°",
                  font=('Helvetica', 8), foreground='gray').pack(anchor='w')
 
-        offset_control_frame = ttk.Frame(offset_frame)
-        offset_control_frame.pack(fill=tk.X, pady=5)
+        ratio_control_frame = ttk.Frame(offset_ratio_frame)
+        ratio_control_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Button(offset_control_frame, text="-5°", width=5,
-                  command=lambda: self.adjust_base_offset(-5)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(offset_control_frame, text="-1°", width=5,
-                  command=lambda: self.adjust_base_offset(-1)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(ratio_control_frame, text="-0.5", width=5,
+                  command=lambda: self.adjust_offset_ratio(-0.5)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(ratio_control_frame, text="-0.1", width=5,
+                  command=lambda: self.adjust_offset_ratio(-0.1)).pack(side=tk.LEFT, padx=2)
 
-        self.offset_entry = ttk.Entry(offset_control_frame, textvariable=self.base_offset_var,
+        self.offset_ratio_var = tk.DoubleVar(value=2.0)
+        self.offset_ratio_entry = ttk.Entry(ratio_control_frame, textvariable=self.offset_ratio_var,
                                       width=8, justify='center')
-        self.offset_entry.pack(side=tk.LEFT, padx=5)
-        self.offset_entry.bind('<Return>', lambda e: self.apply_base_offset())
+        self.offset_ratio_entry.pack(side=tk.LEFT, padx=5)
+        self.offset_ratio_entry.bind('<Return>', lambda e: self.save_offset_ratio())
 
-        ttk.Button(offset_control_frame, text="+1°", width=5,
-                  command=lambda: self.adjust_base_offset(1)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(offset_control_frame, text="+5°", width=5,
-                  command=lambda: self.adjust_base_offset(5)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(ratio_control_frame, text="+0.1", width=5,
+                  command=lambda: self.adjust_offset_ratio(0.1)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(ratio_control_frame, text="+0.5", width=5,
+                  command=lambda: self.adjust_offset_ratio(0.5)).pack(side=tk.LEFT, padx=2)
 
-        offset_btn_frame = ttk.Frame(offset_frame)
-        offset_btn_frame.pack(fill=tk.X, pady=3)
+        self.offset_ratio_status = ttk.Label(offset_ratio_frame, text="Ratio: 1:2.0 (Medium sensitivity)",
+                                             foreground='blue', font=('Helvetica', 8))
+        self.offset_ratio_status.pack(pady=3)
 
-        ttk.Button(offset_btn_frame, text="Apply Offset", command=self.apply_base_offset,
-                  width=12).pack(side=tk.LEFT, padx=2)
-        ttk.Button(offset_btn_frame, text="Reset (0°)", command=self.reset_base_offset,
-                  width=12).pack(side=tk.LEFT, padx=2)
-
-        self.offset_status_label = ttk.Label(offset_frame, text="Offset: 0.0° (Disabled)",
-                                             foreground='gray', font=('Helvetica', 8))
-        self.offset_status_label.pack(pady=3)
-
-        # Enable/Disable offset
-        self.offset_enabled_var = tk.BooleanVar(value=False)
-        self.offset_check = ttk.Checkbutton(offset_frame, text="Enable Base Offset",
-                                           variable=self.offset_enabled_var,
-                                           command=self.toggle_base_offset_enabled)
-        self.offset_check.pack(pady=2)
+        ttk.Label(offset_ratio_frame, text="💡 Lower = more sensitive, Higher = less sensitive",
+                 font=('Helvetica', 8), foreground='gray').pack(anchor='w')
 
         # Sequence control
         seq_frame = ttk.LabelFrame(right_frame, text="Sequence Control", padding="5")
@@ -547,44 +534,39 @@ class UnifiedControlSystem:
         ttk.Label(auto_offset_frame, text="• Shows confidence based on detection quality",
                  font=('Helvetica', 8), foreground='gray', justify=tk.LEFT).pack(anchor='w')
 
-        # Base Offset Control (for grid alignment)
-        offset_calib_frame = ttk.LabelFrame(right_frame, text="⚙️ Manual Base Offset", padding="10")
-        offset_calib_frame.pack(fill=tk.X, pady=10)
+        # Offset Ratio Setting (also in Calibration tab for convenience)
+        offset_ratio_calib_frame = ttk.LabelFrame(right_frame, text="🤖 Auto-Offset Ratio", padding="10")
+        offset_ratio_calib_frame.pack(fill=tk.X, pady=10)
 
-        ttk.Label(offset_calib_frame, text="Fine-tune base position:",
+        ttk.Label(offset_ratio_calib_frame, text="Adjustment sensitivity:",
                  font=('Helvetica', 9, 'bold')).pack(anchor='w')
-        ttk.Label(offset_calib_frame, text="Use when trash falls between grids",
+        ttk.Label(offset_ratio_calib_frame, text="For every X° detected error, adjust base by 1°",
                  font=('Helvetica', 8), foreground='gray').pack(anchor='w')
 
-        offset_calib_control = ttk.Frame(offset_calib_frame)
-        offset_calib_control.pack(fill=tk.X, pady=5)
+        ratio_calib_control = ttk.Frame(offset_ratio_calib_frame)
+        ratio_calib_control.pack(fill=tk.X, pady=5)
 
-        ttk.Button(offset_calib_control, text="-5°", width=5,
-                  command=lambda: self.adjust_base_offset(-5)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(offset_calib_control, text="-1°", width=5,
-                  command=lambda: self.adjust_base_offset(-1)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(ratio_calib_control, text="-0.5", width=5,
+                  command=lambda: self.adjust_offset_ratio(-0.5)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(ratio_calib_control, text="-0.1", width=5,
+                  command=lambda: self.adjust_offset_ratio(-0.1)).pack(side=tk.LEFT, padx=2)
 
-        self.calib_offset_entry = ttk.Entry(offset_calib_control, textvariable=self.base_offset_var,
+        self.calib_offset_ratio_entry = ttk.Entry(ratio_calib_control, textvariable=self.offset_ratio_var,
                                             width=8, justify='center')
-        self.calib_offset_entry.pack(side=tk.LEFT, padx=5)
-        self.calib_offset_entry.bind('<Return>', lambda e: self.apply_base_offset())
+        self.calib_offset_ratio_entry.pack(side=tk.LEFT, padx=5)
+        self.calib_offset_ratio_entry.bind('<Return>', lambda e: self.save_offset_ratio())
 
-        ttk.Button(offset_calib_control, text="+1°", width=5,
-                  command=lambda: self.adjust_base_offset(1)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(offset_calib_control, text="+5°", width=5,
-                  command=lambda: self.adjust_base_offset(5)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(ratio_calib_control, text="+0.1", width=5,
+                  command=lambda: self.adjust_offset_ratio(0.1)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(ratio_calib_control, text="+0.5", width=5,
+                  command=lambda: self.adjust_offset_ratio(0.5)).pack(side=tk.LEFT, padx=2)
 
-        offset_calib_btn = ttk.Frame(offset_calib_frame)
-        offset_calib_btn.pack(fill=tk.X, pady=3)
+        self.calib_offset_ratio_status = ttk.Label(offset_ratio_calib_frame, text="Ratio: 1:2.0 (Medium)",
+                                             foreground='blue', font=('Helvetica', 8))
+        self.calib_offset_ratio_status.pack(pady=3)
 
-        ttk.Button(offset_calib_btn, text="Apply to Base", command=self.apply_base_offset,
-                  width=12).pack(side=tk.LEFT, padx=2)
-        ttk.Button(offset_calib_btn, text="Reset", command=self.reset_base_offset,
-                  width=12).pack(side=tk.LEFT, padx=2)
-
-        self.calib_offset_status = ttk.Label(offset_calib_frame, text="Current: 0.0° (Disabled)",
-                                             foreground='gray', font=('Helvetica', 8))
-        self.calib_offset_status.pack(pady=3)
+        ttk.Label(offset_ratio_calib_frame, text="💡 Lower = more sensitive, Higher = less sensitive",
+                 font=('Helvetica', 8), foreground='gray').pack(anchor='w')
 
         # Sensitivity
         sens_frame = ttk.LabelFrame(right_frame, text="Detection Sensitivity", padding="10")
@@ -1327,8 +1309,6 @@ class UnifiedControlSystem:
     def go_to_rest(self):
         """Go to rest position (simultaneous movement)"""
         rest_angles = LEGACY_PRESETS.get('Rest', DEFAULT_REST)
-        # Apply base offset if enabled
-        rest_angles = self.apply_offset_to_angles(rest_angles)
 
         for i, angle in enumerate(rest_angles):
             self.input_boxes[i].set(str(angle))
@@ -1339,8 +1319,6 @@ class UnifiedControlSystem:
     def go_to_pickup(self):
         """Go to pickup position (simultaneous movement)"""
         pickup_angles = LEGACY_PRESETS.get('Pickup', DEFAULT_PICKUP)
-        # Apply base offset if enabled
-        pickup_angles = self.apply_offset_to_angles(pickup_angles)
 
         for i, angle in enumerate(pickup_angles):
             self.input_boxes[i].set(str(angle))
@@ -1356,8 +1334,6 @@ class UnifiedControlSystem:
 
         try:
             angles = [int(self.input_boxes[i].get()) for i in range(5)]
-            # Apply base offset if enabled
-            angles = self.apply_offset_to_angles(angles)
 
             # Validate all angles
             for i, angle in enumerate(angles):
@@ -1395,92 +1371,100 @@ class UnifiedControlSystem:
         self.log(f"Pasted to Manual Control: {angles}")
         messagebox.showinfo("Pasted!", f"Angles pasted to Manual Control:\n{angles}\n\nClick 'Send' on any servo to move to this position")
 
-    # Base Offset Methods (for grid alignment)
-    def adjust_base_offset(self, amount):
-        """Adjust base offset by amount"""
-        current = self.base_offset_var.get()
-        new_offset = current + amount
-        # Clamp to reasonable range (-15 to +15 degrees)
-        new_offset = max(-15.0, min(15.0, new_offset))
-        self.base_offset_var.set(new_offset)
-        self.update_offset_display()
-        self.log(f"Base offset adjusted: {new_offset:+.1f}°")
+    # Auto-Offset Ratio Methods (for grid alignment)
+    def adjust_offset_ratio(self, amount):
+        """Adjust offset ratio by amount"""
+        current = self.offset_ratio_var.get()
+        new_ratio = current + amount
+        # Clamp to reasonable range (0.5 to 10.0)
+        new_ratio = max(0.5, min(10.0, new_ratio))
+        self.offset_ratio_var.set(new_ratio)
+        self.update_offset_ratio_display()
+        self.log(f"Offset ratio adjusted: 1:{new_ratio:.1f}")
 
-    def apply_base_offset(self):
-        """Apply base offset to current base position"""
+    def save_offset_ratio(self):
+        """Save offset ratio setting"""
         try:
-            offset = self.base_offset_var.get()
-            if not self.is_connected:
-                self.log(f"Base offset set to {offset:+.1f}° (will apply when connected)")
-                self.update_offset_display()
-                return
-
-            # Get current base angle
-            current_base = int(self.input_boxes[0].get())
-            # Apply offset
-            new_base = int(current_base + offset)
-            # Validate range
-            new_base = max(0, min(180, new_base))
-
-            # Update input box
-            self.input_boxes[0].set(str(new_base))
-
-            # Send to Arduino
-            self.send_servo(0)
-
-            self.log(f"Base offset applied: {current_base}° → {new_base}° (offset: {offset:+.1f}°)")
-            self.update_offset_display()
+            ratio = self.offset_ratio_var.get()
+            ratio = max(0.5, min(10.0, ratio))
+            self.offset_ratio_var.set(ratio)
+            self.update_offset_ratio_display()
+            self.log(f"Offset ratio set to 1:{ratio:.1f} (for every {ratio:.1f}° error, adjust 1°)")
         except Exception as e:
-            self.log(f"Error applying offset: {e}")
+            self.log(f"Error setting ratio: {e}")
 
-    def reset_base_offset(self):
-        """Reset base offset to zero"""
-        self.base_offset_var.set(0.0)
-        self.update_offset_display()
-        self.log("Base offset reset to 0.0°")
-
-    def toggle_base_offset_enabled(self):
-        """Enable or disable base offset application"""
-        self.base_offset_enabled = self.offset_enabled_var.get()
-        if self.base_offset_enabled:
-            self.log(f"Base offset ENABLED: {self.base_offset_var.get():+.1f}°")
-            self.offset_status_label.config(text=f"Offset: {self.base_offset_var.get():+.1f}° (Active)",
-                                           foreground='green')
-            if hasattr(self, 'calib_offset_status'):
-                self.calib_offset_status.config(text=f"Current: {self.base_offset_var.get():+.1f}° (Active)",
-                                               foreground='green')
+    def update_offset_ratio_display(self):
+        """Update offset ratio status labels"""
+        ratio = self.offset_ratio_var.get()
+        if ratio < 1.0:
+            sensitivity = "Very High"
+        elif ratio < 2.0:
+            sensitivity = "High"
+        elif ratio < 3.0:
+            sensitivity = "Medium"
+        elif ratio < 5.0:
+            sensitivity = "Low"
         else:
-            self.log("Base offset DISABLED")
-            self.update_offset_display()
+            sensitivity = "Very Low"
 
-    def update_offset_display(self):
-        """Update offset status labels"""
-        offset = self.base_offset_var.get()
-        if self.base_offset_enabled:
-            self.offset_status_label.config(text=f"Offset: {offset:+.1f}° (Active)",
-                                           foreground='green')
-            if hasattr(self, 'calib_offset_status'):
-                self.calib_offset_status.config(text=f"Current: {offset:+.1f}° (Active)",
-                                               foreground='green')
-        else:
-            self.offset_status_label.config(text=f"Offset: {offset:+.1f}° (Disabled)",
-                                           foreground='gray')
-            if hasattr(self, 'calib_offset_status'):
-                self.calib_offset_status.config(text=f"Current: {offset:+.1f}° (Disabled)",
-                                               foreground='gray')
+        status_text = f"Ratio: 1:{ratio:.1f} ({sensitivity} sensitivity)"
+        if hasattr(self, 'offset_ratio_status'):
+            self.offset_ratio_status.config(text=status_text, foreground='blue')
+        if hasattr(self, 'calib_offset_ratio_status'):
+            self.calib_offset_ratio_status.config(text=status_text, foreground='blue')
 
-    def apply_offset_to_angles(self, angles):
-        """Apply base offset to a set of servo angles if enabled"""
-        if not self.base_offset_enabled:
+    def apply_offset_to_sequence_step(self, angles, step_index, total_steps):
+        """Apply auto-offset to base angle only for steps 3 and 4 of sequence
+
+        Args:
+            angles: List of 5 servo angles [base, shoulder, elbow, wrist, gripper]
+            step_index: Current step index (0-based)
+            total_steps: Total number of steps in sequence
+
+        Returns:
+            Modified angles list with offset applied to base if step 3 or 4
+        """
+        # Only apply offset to steps 3 and 4 (indices 2 and 3)
+        # These are typically the pickup and lift steps
+        if step_index not in [2, 3]:
             return angles
 
-        offset = self.base_offset_var.get()
-        if offset == 0.0:
+        # Check if we have valid detection for auto-offset
+        if not hasattr(self, 'last_detected_cell') or not self.last_detected_cell:
             return angles
+
+        # Calculate offset based on detected position error
+        obj = self.last_detected_cell
+        obj_cell = obj.get('cell', '?')
+        obj_cx = obj.get('cx', 0)
+
+        if obj_cell == '?' or obj_cx == 0:
+            return angles
+
+        # Get expected center
+        expected_center = self.get_cell_center(obj_cell)
+        if not expected_center:
+            return angles
+
+        exp_cx, exp_cy = expected_center
+
+        # Calculate pixel offset
+        dx = obj_cx - exp_cx  # Positive = object is to the right
+
+        # Convert to angular offset using ratio setting
+        # For every X° of pixel error, adjust base by 1°
+        ratio = self.offset_ratio_var.get()
+        pixels_per_degree_x = 8.0  # Approximate pixels per degree
+
+        # Calculate angular adjustment
+        angular_offset = dx / (pixels_per_degree_x * ratio)
+
+        # Clamp to reasonable range
+        angular_offset = max(-10.0, min(10.0, angular_offset))
 
         # Apply offset to base angle only (index 0)
         modified = angles.copy()
-        new_base = int(modified[0] + offset)
+        new_base = int(modified[0] + angular_offset)
         # Clamp to valid range
         new_base = max(0, min(180, new_base))
         modified[0] = new_base
@@ -1498,6 +1482,9 @@ class UnifiedControlSystem:
             self.log("Auto-offset suggestions DISABLED")
             self.auto_offset_suggest_label.config(text="No suggestion available", foreground='gray')
             self.auto_offset_confidence_label.config(text="")
+            if hasattr(self, 'manual_auto_offset_label'):
+                self.manual_auto_offset_label.config(text="No suggestion available", foreground='gray')
+                self.manual_auto_offset_conf_label.config(text="")
 
     def analyze_offset_suggestion(self):
         """Analyze detected object positions and suggest base offset"""
@@ -1929,8 +1916,8 @@ class UnifiedControlSystem:
                 if 'angles' in step:
                     # Send multi-move command
                     angles = step['angles']
-                    # Apply base offset if enabled
-                    angles = self.apply_offset_to_angles(angles)
+                    # Apply auto-offset to steps 3 and 4 only (indices 2 and 3)
+                    angles = self.apply_offset_to_sequence_step(angles, i, len(self.sequences[seq_name]))
 
                     delay = step.get('delay', 1000)
                     step_start = time.time()
@@ -2569,8 +2556,8 @@ class UnifiedControlSystem:
 
                 if 'angles' in step:
                     angles = step['angles']
-                    # Apply base offset if enabled
-                    angles = self.apply_offset_to_angles(angles)
+                    # Apply auto-offset to steps 3 and 4 only (indices 2 and 3)
+                    angles = self.apply_offset_to_sequence_step(angles, i, len(self.sequences[cell]))
 
                     delay = step.get('delay', 1000)
                     step_start = time.time()
