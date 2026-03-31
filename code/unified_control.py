@@ -452,7 +452,7 @@ class UnifiedControlSystem:
         left_frame = ttk.LabelFrame(self.calib_tab, text="Camera Preview - Click 4 Corners", padding="10")
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        self.calib_canvas = tk.Canvas(left_frame, bg='black', width=1024, height=768, highlightthickness=0)
+        self.calib_canvas = tk.Canvas(left_frame, bg='black', width=1280, height=960, highlightthickness=0)
         self.calib_canvas.pack(fill=tk.BOTH, expand=True)
         self.calib_canvas.bind('<Button-1>', self.on_calib_click)
 
