@@ -451,14 +451,14 @@ class UnifiedControlSystem:
         # Left: Camera preview
         left_frame = ttk.LabelFrame(self.calib_tab, text="Camera Preview - Click 4 Corners", padding="10")
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        self.calib_canvas = tk.Canvas(left_frame, bg='black', width=640, height=480)
+
+        self.calib_canvas = tk.Canvas(left_frame, bg='black', width=1024, height=768, highlightthickness=0)
         self.calib_canvas.pack(fill=tk.BOTH, expand=True)
         self.calib_canvas.bind('<Button-1>', self.on_calib_click)
-        
+
         # Start calibration preview
         self.start_calib_preview()
-        
+
         # Buttons
         btn_frame = ttk.Frame(left_frame)
         btn_frame.pack(fill=tk.X, pady=10)
@@ -490,112 +490,177 @@ class UnifiedControlSystem:
         self.detection_status_label = ttk.Label(btn_frame, text="No object detected", foreground='gray')
         self.detection_status_label.pack(side=tk.LEFT, padx=10)
 
-        # Right: Auto-Offset & Sensitivity
-        right_frame = ttk.Frame(self.calib_tab)
-        right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
+        # Right: Compact control panel with scrollbar
+        right_container = ttk.Frame(self.calib_tab)
+        right_container.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
 
-        # Auto-Offset Suggestion Display (prominent position)
-        auto_offset_frame = ttk.LabelFrame(right_frame, text="🤖 Auto-Offset Suggestion", padding="10")
-        auto_offset_frame.pack(fill=tk.X, pady=10)
+        # Create canvas with scrollbar for right panel (wider to make camera smaller)
+        right_canvas = tk.Canvas(right_container, width=440, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(right_container, orient="vertical", command=right_canvas.yview)
+        self.right_panel = ttk.Frame(right_canvas)
 
-        ttk.Label(auto_offset_frame, text="Automatically suggests base offset to catch trash between grids",
-                 font=('Helvetica', 8), foreground='blue', wraplength=280).pack(anchor='w', pady=(0, 10))
+        self.right_panel.bind(
+            "<Configure>",
+            lambda e: right_canvas.configure(scrollregion=right_canvas.bbox("all"))
+        )
+
+        right_canvas.create_window((0, 0), window=self.right_panel, anchor="nw")
+        right_canvas.configure(yscrollcommand=scrollbar.set)
+
+        right_container.pack(side=tk.RIGHT, fill=tk.Y)
+        right_canvas.pack(side="left", fill="y", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Bind mouse wheel to scroll
+        def _on_mousewheel(event):
+            right_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        right_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # Auto-Offset Suggestion (compact)
+        auto_offset_frame = ttk.LabelFrame(self.right_panel, text="🤖 Auto-Offset Suggestion", padding="5")
+        auto_offset_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(auto_offset_frame, text="Suggests base offset for trash between grids",
+                 font=('Helvetica', 7), foreground='blue', wraplength=270).pack(anchor='w')
 
         self.auto_offset_suggest_label = ttk.Label(auto_offset_frame,
-                                                   text="No suggestion available",
-                                                   font=('Helvetica', 10, 'bold'), foreground='gray')
-        self.auto_offset_suggest_label.pack(anchor='w', pady=5)
+                                                   text="No suggestion",
+                                                   font=('Helvetica', 9, 'bold'), foreground='gray')
+        self.auto_offset_suggest_label.pack(anchor='w', pady=3)
 
         self.auto_offset_confidence_label = ttk.Label(auto_offset_frame,
                                                       text="",
-                                                      font=('Helvetica', 9), foreground='gray')
-        self.auto_offset_confidence_label.pack(anchor='w', pady=3)
+                                                      font=('Helvetica', 7), foreground='gray')
+        self.auto_offset_confidence_label.pack(anchor='w')
 
         auto_offset_btn_frame = ttk.Frame(auto_offset_frame)
-        auto_offset_btn_frame.pack(fill=tk.X, pady=5)
+        auto_offset_btn_frame.pack(fill=tk.X, pady=3)
 
-        ttk.Button(auto_offset_btn_frame, text="✅ Apply Suggestion",
-                  command=self.apply_suggested_offset, width=18).pack(side=tk.LEFT, padx=2)
-        ttk.Button(auto_offset_btn_frame, text="🔄 Analyze Now",
-                  command=self.analyze_offset_suggestion, width=12).pack(side=tk.LEFT, padx=2)
+        ttk.Button(auto_offset_btn_frame, text="✅ Apply",
+                  command=self.apply_suggested_offset, width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Button(auto_offset_btn_frame, text="🔄 Analyze",
+                  command=self.analyze_offset_suggestion, width=10).pack(side=tk.LEFT, padx=2)
 
         self.auto_offset_enabled_var = tk.BooleanVar(value=False)
         self.auto_offset_check = ttk.Checkbutton(auto_offset_frame,
-                                                 text="Enable auto-analysis (every 0.5s)",
+                                                 text="Enable auto-analysis",
                                                  variable=self.auto_offset_enabled_var,
                                                  command=self.toggle_auto_offset_suggestions)
-        self.auto_offset_check.pack(pady=5)
+        self.auto_offset_check.pack(pady=2)
 
-        ttk.Separator(auto_offset_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+        # Offset Ratio Setting (compact)
+        offset_ratio_calib_frame = ttk.LabelFrame(self.right_panel, text="🤖 Auto-Offset Ratio", padding="5")
+        offset_ratio_calib_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Label(auto_offset_frame, text="How it works:",
-                 font=('Helvetica', 8, 'bold'), foreground='gray').pack(anchor='w')
-        ttk.Label(auto_offset_frame, text="• Detects object position on grid",
-                 font=('Helvetica', 8), foreground='gray', justify=tk.LEFT).pack(anchor='w')
-        ttk.Label(auto_offset_frame, text="• Compares to expected cell center",
-                 font=('Helvetica', 8), foreground='gray', justify=tk.LEFT).pack(anchor='w')
-        ttk.Label(auto_offset_frame, text="• Calculates offset needed to center",
-                 font=('Helvetica', 8), foreground='gray', justify=tk.LEFT).pack(anchor='w')
-        ttk.Label(auto_offset_frame, text="• Shows confidence based on detection quality",
-                 font=('Helvetica', 8), foreground='gray', justify=tk.LEFT).pack(anchor='w')
-
-        # Offset Ratio Setting (also in Calibration tab for convenience)
-        offset_ratio_calib_frame = ttk.LabelFrame(right_frame, text="🤖 Auto-Offset Ratio", padding="10")
-        offset_ratio_calib_frame.pack(fill=tk.X, pady=10)
-
-        ttk.Label(offset_ratio_calib_frame, text="Adjustment sensitivity:",
-                 font=('Helvetica', 9, 'bold')).pack(anchor='w')
-        ttk.Label(offset_ratio_calib_frame, text="For every X° detected error, adjust base by 1°",
-                 font=('Helvetica', 8), foreground='gray').pack(anchor='w')
+        ttk.Label(offset_ratio_calib_frame, text="For every X° error, adjust base by 1°",
+                 font=('Helvetica', 7), foreground='gray').pack(anchor='w')
 
         ratio_calib_control = ttk.Frame(offset_ratio_calib_frame)
-        ratio_calib_control.pack(fill=tk.X, pady=5)
+        ratio_calib_control.pack(fill=tk.X, pady=3)
 
-        ttk.Button(ratio_calib_control, text="-0.5", width=5,
-                  command=lambda: self.adjust_offset_ratio(-0.5)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(ratio_calib_control, text="-0.1", width=5,
-                  command=lambda: self.adjust_offset_ratio(-0.1)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(ratio_calib_control, text="-0.5", width=4,
+                  command=lambda: self.adjust_offset_ratio(-0.5)).pack(side=tk.LEFT, padx=1)
+        ttk.Button(ratio_calib_control, text="-0.1", width=4,
+                  command=lambda: self.adjust_offset_ratio(-0.1)).pack(side=tk.LEFT, padx=1)
 
         self.calib_offset_ratio_entry = ttk.Entry(ratio_calib_control, textvariable=self.offset_ratio_var,
-                                            width=8, justify='center')
-        self.calib_offset_ratio_entry.pack(side=tk.LEFT, padx=5)
+                                            width=6, justify='center')
+        self.calib_offset_ratio_entry.pack(side=tk.LEFT, padx=3)
         self.calib_offset_ratio_entry.bind('<Return>', lambda e: self.save_offset_ratio())
 
-        ttk.Button(ratio_calib_control, text="+0.1", width=5,
-                  command=lambda: self.adjust_offset_ratio(0.1)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(ratio_calib_control, text="+0.5", width=5,
-                  command=lambda: self.adjust_offset_ratio(0.5)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(ratio_calib_control, text="+0.1", width=4,
+                  command=lambda: self.adjust_offset_ratio(0.1)).pack(side=tk.LEFT, padx=1)
+        ttk.Button(ratio_calib_control, text="+0.5", width=4,
+                  command=lambda: self.adjust_offset_ratio(0.5)).pack(side=tk.LEFT, padx=1)
 
-        self.calib_offset_ratio_status = ttk.Label(offset_ratio_calib_frame, text="Ratio: 1:2.0 (Medium)",
-                                             foreground='blue', font=('Helvetica', 8))
-        self.calib_offset_ratio_status.pack(pady=3)
+        self.calib_offset_ratio_status = ttk.Label(offset_ratio_calib_frame, text="Ratio: 1:2.0",
+                                             foreground='blue', font=('Helvetica', 7))
+        self.calib_offset_ratio_status.pack(pady=2)
 
-        ttk.Label(offset_ratio_calib_frame, text="💡 Lower = more sensitive, Higher = less sensitive",
-                 font=('Helvetica', 8), foreground='gray').pack(anchor='w')
+        # Sensitivity (compact)
+        sens_frame = ttk.LabelFrame(self.right_panel, text="Detection Sensitivity", padding="5")
+        sens_frame.pack(fill=tk.X, pady=5)
 
-        # Sensitivity
-        sens_frame = ttk.LabelFrame(right_frame, text="Detection Sensitivity", padding="10")
-        sens_frame.pack(fill=tk.X, pady=10)
-
-        ttk.Label(sens_frame, text="Color Threshold:").pack(anchor='w')
+        ttk.Label(sens_frame, text="Color Threshold:", font=('Helvetica', 7)).pack(anchor='w')
         ttk.Scale(sens_frame, from_=10, to=100, variable=self.threshold_var,
                  orient=tk.HORIZONTAL, command=lambda v: self.update_sensitivity_labels()).pack(fill=tk.X)
 
-        ttk.Label(sens_frame, text="Minimum Area:").pack(anchor='w', pady=(10,0))
+        ttk.Label(sens_frame, text="Min Area:", font=('Helvetica', 7)).pack(anchor='w', pady=(5,0))
         ttk.Scale(sens_frame, from_=1000, to=10000, variable=self.min_area_var,
                  orient=tk.HORIZONTAL, command=lambda v: self.update_sensitivity_labels()).pack(fill=tk.X)
 
-        ttk.Label(sens_frame, text="Min Solidity:").pack(anchor='w', pady=(10,0))
+        ttk.Label(sens_frame, text="Min Solidity:", font=('Helvetica', 7)).pack(anchor='w', pady=(5,0))
         ttk.Scale(sens_frame, from_=0.1, to=0.9, variable=self.solidity_var,
                  orient=tk.HORIZONTAL, command=lambda v: self.update_sensitivity_labels()).pack(fill=tk.X)
 
-        self.sens_label = ttk.Label(sens_frame, text="")
-        self.sens_label.pack(pady=5)
+        self.sens_label = ttk.Label(sens_frame, text="", font=('Helvetica', 7))
+        self.sens_label.pack(pady=3)
         self.update_sensitivity_labels()
 
-        # Corner status (compact)
-        self.corner_label = ttk.Label(right_frame, text="Corners: 0/4 clicked", foreground='blue', font=('Helvetica', 9, 'bold'))
-        self.corner_label.pack(pady=10)
+        # Corner status
+        self.corner_label = ttk.Label(self.right_panel, text="Corners: 0/4 clicked", foreground='blue', font=('Helvetica', 8, 'bold'))
+        self.corner_label.pack(pady=5)
+
+        # Camera Settings (compact)
+        cam_frame = ttk.LabelFrame(self.right_panel, text="📷 Camera Exposure", padding="5")
+        cam_frame.pack(fill=tk.X, pady=5)
+
+        # Exposure mode
+        ttk.Label(cam_frame, text="Mode:", font=('Helvetica', 7, 'bold')).pack(anchor='w')
+        self.exposure_mode_var = tk.StringVar(value="auto")
+        mode_frame = ttk.Frame(cam_frame)
+        mode_frame.pack(fill=tk.X, pady=2)
+        ttk.Radiobutton(mode_frame, text="Auto", variable=self.exposure_mode_var,
+                       value="auto", command=self.update_camera_exposure).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(mode_frame, text="Manual", variable=self.exposure_mode_var,
+                       value="manual", command=self.update_camera_exposure).pack(side=tk.LEFT, padx=5)
+
+        # Exposure slider
+        ttk.Label(cam_frame, text="Exposure:", font=('Helvetica', 7)).pack(anchor='w', pady=(5,0))
+        self.exposure_var = tk.IntVar(value=2400)
+        self.exposure_scale = ttk.Scale(cam_frame, from_=156, to=5000,
+                                        variable=self.exposure_var, orient=tk.HORIZONTAL,
+                                        command=self.update_camera_exposure)
+        self.exposure_scale.pack(fill=tk.X)
+        self.exposure_value_label = ttk.Label(cam_frame, text="2400 (Auto)", foreground='gray', font=('Helvetica', 7))
+        self.exposure_value_label.pack()
+
+        # Gamma
+        ttk.Label(cam_frame, text="Gamma:", font=('Helvetica', 7)).pack(anchor='w', pady=(5,0))
+        self.gamma_var = tk.IntVar(value=140)
+        self.gamma_scale = ttk.Scale(cam_frame, from_=100, to=200,
+                                     variable=self.gamma_var, orient=tk.HORIZONTAL,
+                                     command=self.update_camera_exposure)
+        self.gamma_scale.pack(fill=tk.X)
+        self.gamma_value_label = ttk.Label(cam_frame, text="140", foreground='gray', font=('Helvetica', 7))
+        self.gamma_value_label.pack()
+
+        # Saturation
+        ttk.Label(cam_frame, text="Saturation:", font=('Helvetica', 7)).pack(anchor='w', pady=(5,0))
+        self.saturation_var = tk.IntVar(value=17)
+        self.saturation_scale = ttk.Scale(cam_frame, from_=0, to=32,
+                                          variable=self.saturation_var, orient=tk.HORIZONTAL,
+                                          command=self.update_camera_exposure)
+        self.saturation_scale.pack(fill=tk.X)
+        self.saturation_value_label = ttk.Label(cam_frame, text="17", foreground='gray', font=('Helvetica', 7))
+        self.saturation_value_label.pack()
+
+        # Sharpness
+        ttk.Label(cam_frame, text="Sharpness:", font=('Helvetica', 7)).pack(anchor='w', pady=(5,0))
+        self.sharpness_var = tk.IntVar(value=5)
+        self.sharpness_scale = ttk.Scale(cam_frame, from_=0, to=10,
+                                         variable=self.sharpness_var, orient=tk.HORIZONTAL,
+                                         command=self.update_camera_exposure)
+        self.sharpness_scale.pack(fill=tk.X)
+        self.sharpness_value_label = ttk.Label(cam_frame, text="5", foreground='gray', font=('Helvetica', 7))
+        self.sharpness_value_label.pack()
+
+        # Reset button
+        ttk.Button(cam_frame, text="🔄 Reset Defaults",
+                  command=self.reset_camera_settings).pack(pady=5, fill=tk.X)
+
+        # Apply initial settings
+        self.root.after(1000, self.init_camera_settings)
 
     def setup_sequences_tab(self):
         """Setup sequences tab"""
@@ -1759,7 +1824,7 @@ class UnifiedControlSystem:
             if canvas_width < 2 or canvas_height < 2:
                 return
 
-            # Get frame dimensions - reduce resolution for faster processing
+            # Get frame dimensions
             frame_height, frame_width = frame.shape[:2]
 
             # Calculate scale to fit canvas (maintain aspect ratio)
@@ -1773,13 +1838,13 @@ class UnifiedControlSystem:
             if new_width < 1 or new_height < 1:
                 return
 
-            # Resize (smaller = faster)
+            # Resize
             display_frame = cv2.resize(frame, (new_width, new_height))
 
             # Create black background
             bg = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
 
-            # Center image
+            # Center the image
             y_offset = (canvas_height - new_height) // 2
             x_offset = (canvas_width - new_width) // 2
             bg[y_offset:y_offset+new_height, x_offset:x_offset+new_width] = display_frame
@@ -1826,11 +1891,10 @@ class UnifiedControlSystem:
                         pt2_y = int(self.all_points[idx2][1] * scale) + y_offset
                         cv2.line(bg, (pt1_x, pt1_y), (pt2_x, pt2_y), (0, 255, 0), 2)
 
-            # Object detection - run every 4th frame (~2.5 FPS at 10 FPS camera)
-            # Draw detection box in camera thread to prevent flickering
+            # Object detection - run every 4th frame
             self.frame_count += 1
             if self.detect_in_calib_var.get() and hasattr(self, 'empty_grid') and self.empty_grid is not None:
-                if self.frame_count % 4 == 0:  # Detect every 4th frame (~2.5 Hz)
+                if self.frame_count % 4 == 0:
                     objects = self.detect_objects(frame)
                     if objects:
                         self.last_detection_time = time.time()
@@ -1838,7 +1902,6 @@ class UnifiedControlSystem:
                         detected_cell_name = self.find_cell(detected['cx'], detected['cy'])
                         detected['cell'] = detected_cell_name
 
-                        # Cell hysteresis - only update confirmed cell after seeing it multiple times
                         if detected_cell_name == self.cell_confirmed:
                             self.cell_confirmation_count += 1
                         else:
@@ -1852,26 +1915,21 @@ class UnifiedControlSystem:
 
                         self.last_detected_cell = detected
 
-                # Use persisted detection for 8 seconds (prevents flickering)
                 has_detection = hasattr(self, 'last_detected_cell') and self.last_detected_cell is not None
                 if has_detection and time.time() - self.last_detection_time < self.detection_timeout:
                     obj = self.last_detected_cell
-                    # Scale detection coordinates to display coordinates
                     disp_x = int(obj['x'] * scale) + x_offset
                     disp_y = int(obj['y'] * scale) + y_offset
                     disp_w = int(obj['w'] * scale)
                     disp_h = int(obj['h'] * scale)
 
-                    # Draw detection box (yellow, THICK: 2px)
                     cv2.rectangle(bg, (disp_x, disp_y), (disp_x+disp_w, disp_y+disp_h), (0, 255, 255), 2)
 
-                    # Get detection info
                     cell = obj.get('cell', '?')
                     area = obj.get('area', 0)
                     solidity = obj.get('solidity', 0)
                     threshold = self.threshold_var.get()
 
-                    # Draw info box with area, solidity, and threshold (BOLD text, thickness=2)
                     info_text = f"{cell} | {area:.0f}px | S:{solidity:.2f} | Th:{threshold}"
                     cv2.putText(bg, info_text, (disp_x, disp_y-10),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
@@ -1879,11 +1937,9 @@ class UnifiedControlSystem:
             # Convert BGR to RGB
             bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
 
-            # Convert to PhotoImage and update canvas (must be from main thread)
             img = Image.fromarray(bg)
             photo = ImageTk.PhotoImage(image=img)
 
-            # Update canvas from main thread
             self.root.after(0, self._update_canvas_image, photo)
 
         except Exception as e:
@@ -2021,39 +2077,73 @@ class UnifiedControlSystem:
         if hasattr(self, 'cap') and self.cap:
             self.cap.release()
 
-        # Open camera at configured index
-        self.cap = cv2.VideoCapture(camera_index)
+        # Try opening camera with multiple methods (index and direct path)
+        camera_opened = False
 
-        # If primary index fails, try adjacent indices (Z-Star may move on replug)
-        if not self.cap.isOpened():
+        # Method 1: Try by index first
+        self.cap = cv2.VideoCapture(camera_index)
+        if self.cap.isOpened():
+            camera_opened = True
+            self.log(f"Camera opened by index {camera_index}")
+
+        # Method 2: Try direct device path (more reliable after reboot)
+        if not camera_opened:
+            device_path = f"/dev/video{camera_index}"
+            self.log(f"Index {camera_index} failed, trying direct path: {device_path}")
+            self.cap.release()
+            self.cap = cv2.VideoCapture(device_path)
+            if self.cap.isOpened():
+                camera_opened = True
+                self.log(f"Camera opened by direct path {device_path}")
+
+        # Method 3: Try adjacent indices (Z-Star may move on replug)
+        if not camera_opened:
             self.log(f"Device {camera_index} not available, trying {camera_index+1}...")
             self.cap.release()
             self.cap = cv2.VideoCapture(camera_index + 1)
+            if self.cap.isOpened():
+                camera_opened = True
+                self.log(f"Camera opened at index {camera_index+1}")
 
-        # If still failing, try common Z-Star indices as fallback
-        if not self.cap.isOpened():
-            for fallback_idx in [3, 4]:
+        # Method 4: Try common Z-Star indices as fallback
+        if not camera_opened:
+            for fallback_idx in [0, 3, 4]:
                 if fallback_idx != camera_index and fallback_idx != camera_index + 1:
                     self.log(f"Trying fallback device {fallback_idx}...")
                     self.cap.release()
                     self.cap = cv2.VideoCapture(fallback_idx)
                     if self.cap.isOpened():
+                        camera_opened = True
                         self.log(f"Fallback camera opened at {fallback_idx}")
                         # Update UI to reflect the working camera
                         self.camera_index_var.set(str(fallback_idx))
                         break
 
-        if self.cap.isOpened():
+        # Method 5: Scan all /dev/video* devices
+        if not camera_opened:
+            import glob
+            for dev in glob.glob("/dev/video[0-9]"):
+                self.log(f"Scanning {dev}...")
+                self.cap.release()
+                self.cap = cv2.VideoCapture(dev)
+                if self.cap.isOpened():
+                    camera_opened = True
+                    dev_idx = dev.replace("/dev/video", "")
+                    self.log(f"Camera found at {dev}")
+                    self.camera_index_var.set(dev_idx)
+                    break
+
+        if camera_opened and self.cap.isOpened():
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            self.log(f"Camera opened successfully at /dev/video{camera_index}")
+            self.log(f"Camera opened successfully")
             self.update_calib_preview()
         else:
-            self.log(f"ERROR: Camera not found at configured index {camera_index} or fallbacks!")
+            self.log(f"ERROR: Camera not found at configured index {camera_index} or any fallback!")
             messagebox.showerror(
                 "Camera Error",
                 f"Could not open camera!\n\n"
-                f"Tried: /dev/video{camera_index}, /dev/video{camera_index+1}, /dev/video3, /dev/video4\n\n"
+                f"Tried: index {camera_index}, /dev/video{camera_index}, /dev/video{camera_index+1}, /dev/video0, /dev/video3, /dev/video4\n\n"
                 f"Make sure:\n"
                 f"1. Camera is plugged in\n"
                 f"2. Try a different USB port\n"
@@ -2439,6 +2529,109 @@ class UnifiedControlSystem:
             self.pickup_btn.config(state='disabled')
             self.auto_pickup_chk.config(state='disabled')
             self.detection_status_label.config(text="No object detected", foreground='gray')
+
+    def init_camera_settings(self):
+        """Initialize camera settings on startup"""
+        try:
+            # Read current values from camera
+            import subprocess
+            result = subprocess.run(
+                ['v4l2-ctl', '--device=/dev/video0', '--list-ctrls'],
+                capture_output=True, text=True, timeout=2
+            )
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'exposure_time_absolute' in line and 'value=' in line:
+                        try:
+                            val = int(line.split('value=')[1].split()[0])
+                            self.exposure_var.set(val)
+                            self.exposure_value_label.config(text=f"Value: {val} (Auto)")
+                        except: pass
+                    if 'gamma' in line and 'value=' in line:
+                        try:
+                            val = int(line.split('value=')[1].split()[0])
+                            self.gamma_var.set(val)
+                            self.gamma_value_label.config(text=f"Value: {val}")
+                        except: pass
+                    if 'saturation' in line and 'value=' in line:
+                        try:
+                            val = int(line.split('value=')[1].split()[0])
+                            self.saturation_var.set(val)
+                            self.saturation_value_label.config(text=f"Value: {val}")
+                        except: pass
+                    if 'sharpness' in line and 'value=' in line:
+                        try:
+                            val = int(line.split('value=')[1].split()[0])
+                            self.sharpness_var.set(val)
+                            self.sharpness_value_label.config(text=f"Value: {val}")
+                        except: pass
+        except Exception as e:
+            pass  # Silently ignore if v4l2-ctl fails
+
+    def update_camera_exposure(self, val=None):
+        """Update camera exposure using v4l2-ctl"""
+        try:
+            mode = self.exposure_mode_var.get()
+            exposure = self.exposure_var.get()
+            gamma = self.gamma_var.get()
+            saturation = self.saturation_var.get()
+            sharpness = self.sharpness_var.get()
+
+            # Update labels
+            mode_text = "(Auto)" if mode == "auto" else f"(Manual: {exposure})"
+            self.exposure_value_label.config(text=f"Value: {exposure} {mode_text}")
+            self.gamma_value_label.config(text=f"Value: {gamma}")
+            self.saturation_value_label.config(text=f"Value: {saturation}")
+            self.sharpness_value_label.config(text=f"Value: {sharpness}")
+
+            # Disable/enable exposure slider based on mode
+            if mode == "auto":
+                self.exposure_scale.config(state='disabled')
+            else:
+                self.exposure_scale.config(state='normal')
+
+            # Apply settings via v4l2-ctl
+            import subprocess
+
+            # Set exposure mode: 3=Auto, 1=Manual
+            if mode == "auto":
+                subprocess.run(
+                    ['v4l2-ctl', '--device=/dev/video0',
+                     '-c', 'auto_exposure=3'],
+                    capture_output=True, timeout=2
+                )
+                self.log("Camera exposure set to AUTO")
+            else:
+                # First set to manual mode, then set exposure value
+                subprocess.run(
+                    ['v4l2-ctl', '--device=/dev/video0',
+                     '-c', 'auto_exposure=1',
+                     '-c', f'exposure_time_absolute={exposure}'],
+                    capture_output=True, timeout=2
+                )
+                self.log(f"Camera exposure set to MANUAL: {exposure}")
+
+            # Set gamma, saturation, sharpness (always applied)
+            subprocess.run(
+                ['v4l2-ctl', '--device=/dev/video0',
+                 '-c', f'gamma={gamma}',
+                 '-c', f'saturation={saturation}',
+                 '-c', f'sharpness={sharpness}'],
+                capture_output=True, timeout=2
+            )
+
+        except Exception as e:
+            self.log(f"Camera setting error: {e}")
+
+    def reset_camera_settings(self):
+        """Reset camera settings to defaults"""
+        self.exposure_mode_var.set("auto")
+        self.exposure_var.set(2400)
+        self.gamma_var.set(140)
+        self.saturation_var.set(17)  # Default saturation
+        self.sharpness_var.set(5)    # Default sharpness
+        self.update_camera_exposure()
+        self.log("Camera settings reset to defaults")
 
     def toggle_auto_pickup(self):
         """Toggle auto pickup mode"""
