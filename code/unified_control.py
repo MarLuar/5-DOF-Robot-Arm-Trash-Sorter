@@ -172,6 +172,7 @@ class UnifiedControlSystem:
         self.last_offset_analysis_time = 0
         self.offset_analysis_interval = 0.5  # Analyze every 0.5 seconds (2 Hz) for fast response
         self.auto_offset_enabled_var = tk.BooleanVar(value=False)  # Enable auto-analysis
+        self._last_applied_offset = 0.0  # Track last applied offset for display
 
         # Load saved camera setting BEFORE UI setup (calibration tab needs it)
         self.load_camera_setting()  # Auto-load saved camera setting
@@ -1537,14 +1538,14 @@ class UnifiedControlSystem:
         exp_cx, exp_cy = expected_center
 
         # Calculate pixel offset
-        dx = obj_cx - exp_cx  # Positive = object is to the right
+        dx = exp_cx - obj_cx  # Positive = object is to the right (need to decrease base angle)
 
         # Convert to angular offset using ratio setting
         # For every X° of pixel error, adjust base by 1°
         ratio = self.offset_ratio_var.get()
         pixels_per_degree_x = 8.0  # Approximate pixels per degree
 
-        # Calculate angular adjustment
+        # Calculate angular adjustment (inverted: right = decrease angle, left = increase)
         angular_offset = dx / (pixels_per_degree_x * ratio)
 
         # Clamp to reasonable range
@@ -1556,6 +1557,9 @@ class UnifiedControlSystem:
         # Clamp to valid range
         new_base = max(0, min(180, new_base))
         modified[0] = new_base
+
+        # Store the offset for consistent display across steps 3 and 4
+        self._last_applied_offset = angular_offset
 
         return modified
 
@@ -2051,13 +2055,14 @@ class UnifiedControlSystem:
                     delay = step.get('delay', 1000)
                     step_start = time.time()
 
-                    # Update step 3 & 4 base value display
-                    if i == 2:  # Step 3
-                        self._safe_after(0, lambda a=angles_with_offset[0]: self.step3_base_label.config(
-                            text=f"Step 3 (Pickup): {a:.0f}° (base: {angles[0]:.0f}° + offset: {a-angles[0]:+.0f}°)"))
-                    elif i == 3:  # Step 4
-                        self._safe_after(0, lambda a=angles_with_offset[0]: self.step4_base_label.config(
-                            text=f"Step 4 (Lift): {a:.0f}° (base: {angles[0]:.0f}° + offset: {a-angles[0]:+.0f}°)"))
+                    # Update step 3 & 4 base value display (show same offset for both)
+                    if i in [2, 3]:  # Steps 3 or 4
+                        offset = getattr(self, '_last_applied_offset', 0)
+                        base_with_offset = angles_with_offset[0]
+                        self._safe_after(0, lambda b=base_with_offset, o=offset: self.step3_base_label.config(
+                            text=f"Step 3 (Pickup): {b:.0f}° (base: {angles[0]:.0f}° - offset: {-o:+.0f}°)"))
+                        self._safe_after(0, lambda b=base_with_offset, o=offset: self.step4_base_label.config(
+                            text=f"Step 4 (Lift): {b:.0f}° (base: {angles[0]:.0f}° - offset: {-o:+.0f}°)"))
 
                     command = f"M {angles_with_offset[0]} {angles_with_offset[1]} {angles_with_offset[2]} {angles_with_offset[3]} {angles_with_offset[4]}\n"
                     self.send_to_arduino(command)
@@ -2776,13 +2781,14 @@ class UnifiedControlSystem:
                     delay = step.get('delay', 1000)
                     step_start = time.time()
 
-                    # Update step 3 & 4 base value display
-                    if i == 2:  # Step 3
-                        self._safe_after(0, lambda a=angles[0]: self.step3_base_label.config(
-                            text=f"Step 3 (Pickup): {a:.0f}° (base: {angles_original[0]:.0f}° + offset: {a-angles_original[0]:+.0f}°)"))
-                    elif i == 3:  # Step 4
-                        self._safe_after(0, lambda a=angles[0]: self.step4_base_label.config(
-                            text=f"Step 4 (Lift): {a:.0f}° (base: {angles_original[0]:.0f}° + offset: {a-angles_original[0]:+.0f}°)"))
+                    # Update step 3 & 4 base value display (show same offset for both)
+                    if i in [2, 3]:  # Steps 3 or 4
+                        offset = getattr(self, '_last_applied_offset', 0)
+                        base_with_offset = angles[0]
+                        self._safe_after(0, lambda b=base_with_offset, o=offset: self.step3_base_label.config(
+                            text=f"Step 3 (Pickup): {b:.0f}° (base: {angles_original[0]:.0f}° - offset: {-o:+.0f}°)"))
+                        self._safe_after(0, lambda b=base_with_offset, o=offset: self.step4_base_label.config(
+                            text=f"Step 4 (Lift): {b:.0f}° (base: {angles_original[0]:.0f}° - offset: {-o:+.0f}°)"))
 
                     # Send multi-move command directly
                     command = f"M {angles[0]} {angles[1]} {angles[2]} {angles[3]} {angles[4]}\n"
