@@ -1267,6 +1267,14 @@ class UnifiedControlSystem:
         # Start monitoring for communication errors
         self.root.after(5000, self._monitor_communication)
 
+    def _on_connect_error(self, e):
+        """Called when connection fails"""
+        self.is_connected = False
+        self.connect_btn.config(text="Connect")
+        self.status_label.config(text="Status: Disconnected", foreground='red')
+        self.log(f"Connection failed: {e}")
+        messagebox.showerror("Connection Error", f"Could not connect to serial port:\n{e}\n\nPlease check:\n1. Arduino is powered on\n2. Correct port is selected\n3. Cable is properly connected")
+
     def _monitor_communication(self):
         """Monitor serial communication for errors and auto-recover"""
         if self.is_connected and self.serial_conn:
