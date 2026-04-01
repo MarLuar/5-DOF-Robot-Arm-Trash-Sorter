@@ -186,7 +186,7 @@ class UnifiedControlSystem:
 
         # Start logging
         self.log("System initialized - v1.00.02")
-        self.log(f"🧵 Main thread: {threading.current_thread().name}")
+        self.log(f"Main thread: {threading.current_thread().name}")
 
         # Load sequences (after UI is ready)
         self.load_sequences()
@@ -284,7 +284,7 @@ class UnifiedControlSystem:
         ttk.Button(preset_frame, text="Send All (Simultaneous)", command=self.send_all_servos).pack(side=tk.LEFT, padx=5)
 
         # Camera Configuration (on left side)
-        cam_frame = ttk.LabelFrame(left_frame, text="📷 ZStar Camera Settings", padding="5")
+        cam_frame = ttk.LabelFrame(left_frame, text="ZStar Camera Settings", padding="5")
         cam_frame.pack(fill=tk.X, pady=5)
 
         ttk.Label(cam_frame, text="Camera Device:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
@@ -379,7 +379,7 @@ class UnifiedControlSystem:
         ttk.Button(speed_frame, text="Set Speed", command=self.set_speed).pack(pady=5)
 
         # Auto-Offset Ratio Setting (for grid alignment)
-        offset_ratio_frame = ttk.LabelFrame(right_frame, text="🤖 Auto-Offset Ratio", padding="5")
+        offset_ratio_frame = ttk.LabelFrame(right_frame, text="Auto-Offset Ratio", padding="5")
         offset_ratio_frame.pack(fill=tk.X, pady=5)
 
         ttk.Label(offset_ratio_frame, text="Adjustment sensitivity:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
@@ -409,7 +409,7 @@ class UnifiedControlSystem:
                                              foreground='blue', font=('Helvetica', 8))
         self.offset_ratio_status.pack(pady=3)
 
-        ttk.Label(offset_ratio_frame, text="💡 Lower = more sensitive, Higher = less sensitive",
+        ttk.Label(offset_ratio_frame, text="Lower = more sensitive, Higher = less sensitive",
                  font=('Helvetica', 8), foreground='gray').pack(anchor='w')
 
         # Sequence control
@@ -424,7 +424,7 @@ class UnifiedControlSystem:
         ttk.Button(seq_frame, text="Stop", command=self.stop_sequence).pack(pady=2)
 
         # Auto-Offset Suggestion (Manual Control tab)
-        manual_auto_offset_frame = ttk.LabelFrame(right_frame, text="🤖 Auto-Offset Suggestion", padding="10")
+        manual_auto_offset_frame = ttk.LabelFrame(right_frame, text="Auto-Offset Suggestion", padding="10")
         manual_auto_offset_frame.pack(fill=tk.X, pady=10)
 
         self.manual_auto_offset_label = ttk.Label(manual_auto_offset_frame,
@@ -440,12 +440,12 @@ class UnifiedControlSystem:
         manual_auto_btn_frame = ttk.Frame(manual_auto_offset_frame)
         manual_auto_btn_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Button(manual_auto_btn_frame, text="✅ Apply Suggestion",
+        ttk.Button(manual_auto_btn_frame, text="Apply Suggestion",
                   command=self.apply_suggested_offset, width=18).pack(side=tk.LEFT, padx=2)
-        ttk.Button(manual_auto_btn_frame, text="🔄 Analyze Now",
+        ttk.Button(manual_auto_btn_frame, text="Analyze Now",
                   command=self.analyze_offset_suggestion, width=12).pack(side=tk.LEFT, padx=2)
 
-        ttk.Label(manual_auto_offset_frame, text="💡 For auto-analysis, enable in Grid Calibration tab",
+        ttk.Label(manual_auto_offset_frame, text="For auto-analysis, enable in Grid Calibration tab",
                  font=('Helvetica', 8), foreground='blue').pack(anchor='w', pady=(5,0))
 
     def setup_calibration_tab(self):
@@ -519,7 +519,7 @@ class UnifiedControlSystem:
         right_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         # Auto-Offset Suggestion (compact)
-        auto_offset_frame = ttk.LabelFrame(self.right_panel, text="🤖 Auto-Offset Suggestion", padding="5")
+        auto_offset_frame = ttk.LabelFrame(self.right_panel, text="Auto-Offset Suggestion", padding="5")
         auto_offset_frame.pack(fill=tk.X, pady=5)
 
         ttk.Label(auto_offset_frame, text="Suggests base offset for trash between grids",
@@ -538,9 +538,9 @@ class UnifiedControlSystem:
         auto_offset_btn_frame = ttk.Frame(auto_offset_frame)
         auto_offset_btn_frame.pack(fill=tk.X, pady=3)
 
-        ttk.Button(auto_offset_btn_frame, text="✅ Apply",
+        ttk.Button(auto_offset_btn_frame, text="Apply",
                   command=self.apply_suggested_offset, width=10).pack(side=tk.LEFT, padx=2)
-        ttk.Button(auto_offset_btn_frame, text="🔄 Analyze",
+        ttk.Button(auto_offset_btn_frame, text="Analyze",
                   command=self.analyze_offset_suggestion, width=10).pack(side=tk.LEFT, padx=2)
 
         self.auto_offset_enabled_var = tk.BooleanVar(value=False)
@@ -551,7 +551,7 @@ class UnifiedControlSystem:
         self.auto_offset_check.pack(pady=2)
 
         # Offset Ratio Setting (compact)
-        offset_ratio_calib_frame = ttk.LabelFrame(self.right_panel, text="🤖 Auto-Offset Ratio", padding="5")
+        offset_ratio_calib_frame = ttk.LabelFrame(self.right_panel, text="Auto-Offset Ratio", padding="5")
         offset_ratio_calib_frame.pack(fill=tk.X, pady=5)
 
         ttk.Label(offset_ratio_calib_frame, text="For every X° error, adjust base by 1°",
@@ -604,7 +604,7 @@ class UnifiedControlSystem:
         self.corner_label.pack(pady=5)
 
         # Camera Settings (compact)
-        cam_frame = ttk.LabelFrame(self.right_panel, text="📷 Camera Exposure", padding="5")
+        cam_frame = ttk.LabelFrame(self.right_panel, text="Camera Exposure", padding="5")
         cam_frame.pack(fill=tk.X, pady=5)
 
         # Exposure mode
@@ -658,11 +658,11 @@ class UnifiedControlSystem:
         self.sharpness_value_label.pack()
 
         # Reset button
-        ttk.Button(cam_frame, text="🔄 Reset Defaults",
+        ttk.Button(cam_frame, text="Reset Defaults",
                   command=self.reset_camera_settings).pack(pady=5, fill=tk.X)
 
         # Step 3 & 4 Base Values Display
-        step_values_frame = ttk.LabelFrame(self.right_panel, text="🔧 Step 3 & 4 Base Values", padding="5")
+        step_values_frame = ttk.LabelFrame(self.right_panel, text="Step 3 & 4 Base Values", padding="5")
         step_values_frame.pack(fill=tk.X, pady=10)
 
         ttk.Label(step_values_frame, text="Base angles being sent to Arduino:",
@@ -676,7 +676,7 @@ class UnifiedControlSystem:
                                           font=('Helvetica', 9, 'bold'), foreground='green')
         self.step4_base_label.pack(anchor='w', pady=3)
 
-        ttk.Label(step_values_frame, text="💡 Values include auto-offset if enabled",
+        ttk.Label(step_values_frame, text="Values include auto-offset if enabled",
                  font=('Helvetica', 6), foreground='gray').pack(anchor='w', pady=(3,0))
 
         # Apply initial settings
@@ -1697,7 +1697,7 @@ class UnifiedControlSystem:
 
         # Update UI (both Calibration and Manual tabs)
         if abs(avg_offset) < 0.5:
-            msg = f"✓ Alignment looks good! (offset: {avg_offset:+.1f}°)"
+            msg = f"Alignment looks good! (offset: {avg_offset:+.1f}°)"
             color = 'green'
         else:
             # For this servo: positive = higher angle = turns LEFT, negative = lower angle = turns RIGHT
@@ -1959,7 +1959,7 @@ class UnifiedControlSystem:
                             if self.cell_confirmation_count >= self.cell_hysteresis_threshold:
                                 self.cell_confirmed = detected_cell_name
                                 self.cell_confirmation_count = 1
-                                self.log(f"📍 Object detected in {detected_cell_name}")
+                                self.log(f"Object detected in {detected_cell_name}")
                             else:
                                 self.cell_confirmation_count += 1
                                 detected['cell'] = self.cell_confirmed if self.cell_confirmed else detected_cell_name
