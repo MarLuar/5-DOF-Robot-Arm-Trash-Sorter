@@ -369,40 +369,6 @@ class UnifiedControlSystem:
         ttk.Button(preset_frame, text="Copy Current Angles", command=self.copy_current_angles).pack(fill=tk.X, pady=2)
         ttk.Button(preset_frame, text="Paste to Manual Control", command=self.paste_to_manual).pack(fill=tk.X, pady=2)
 
-        # Global Base Adjustment
-        base_adj_frame = ttk.LabelFrame(preset_frame, text="Global Base Adjustment", padding="5")
-        base_adj_frame.pack(fill=tk.X, pady=5)
-
-        ttk.Label(base_adj_frame, text="Adjust all base angles in sequences:", font=('Helvetica', 8)).pack(anchor='w')
-
-        base_adj_control = ttk.Frame(base_adj_frame)
-        base_adj_control.pack(fill=tk.X, pady=3)
-
-        ttk.Button(base_adj_control, text="-20°", width=5,
-                  command=lambda: self.global_base_adjust(-20)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(base_adj_control, text="-10°", width=5,
-                  command=lambda: self.global_base_adjust(-10)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(base_adj_control, text="-5°", width=5,
-                  command=lambda: self.global_base_adjust(-5)).pack(side=tk.LEFT, padx=2)
-
-        self.base_adjust_var = tk.StringVar(value="0")
-        self.base_adjust_entry = ttk.Entry(base_adj_control, textvariable=self.base_adjust_var, width=6, justify='center')
-        self.base_adjust_entry.pack(side=tk.LEFT, padx=5)
-        self.base_adjust_entry.bind('<Return>', lambda e: self.global_base_adjust_custom())
-
-        ttk.Button(base_adj_control, text="+5°", width=5,
-                  command=lambda: self.global_base_adjust(5)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(base_adj_control, text="+10°", width=5,
-                  command=lambda: self.global_base_adjust(10)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(base_adj_control, text="+20°", width=5,
-                  command=lambda: self.global_base_adjust(20)).pack(side=tk.LEFT, padx=2)
-
-        ttk.Button(base_adj_control, text="Apply", width=8,
-                  command=self.global_base_adjust_custom, style='Accent.TButton').pack(side=tk.LEFT, padx=5)
-
-        self.base_adjust_status = ttk.Label(base_adj_frame, text="No adjustment applied", foreground='gray', font=('Helvetica', 7))
-        self.base_adjust_status.pack(anchor='w', pady=2)
-
         # Speed
         speed_frame = ttk.LabelFrame(right_frame, text="Movement Speed", padding="5")
         speed_frame.pack(fill=tk.X, pady=5)
@@ -804,6 +770,42 @@ class UnifiedControlSystem:
         ttk.Button(right_frame, text="Set Current as Pickup", command=self.set_current_as_pickup).pack(fill=tk.X, pady=2)
 
         ttk.Button(right_frame, text="Play Sequence", command=self.test_sequence).pack(fill=tk.X, pady=10)
+
+        # Global Base Adjustment
+        base_adj_frame = ttk.LabelFrame(right_frame, text="Global Base Adjustment", padding="8")
+        base_adj_frame.pack(fill=tk.X, pady=10)
+
+        ttk.Label(base_adj_frame, text="Adjust ALL base angles in ALL sequences:", font=('Helvetica', 8, 'bold')).pack(anchor='w', pady=(0,5))
+
+        base_adj_control = ttk.Frame(base_adj_frame)
+        base_adj_control.pack(fill=tk.X, pady=3)
+
+        ttk.Button(base_adj_control, text="-20°", width=5,
+                  command=lambda: self.global_base_adjust(-20)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(base_adj_control, text="-10°", width=5,
+                  command=lambda: self.global_base_adjust(-10)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(base_adj_control, text="-5°", width=5,
+                  command=lambda: self.global_base_adjust(-5)).pack(side=tk.LEFT, padx=2)
+
+        self.base_adjust_var = tk.StringVar(value="0")
+        self.base_adjust_entry = ttk.Entry(base_adj_control, textvariable=self.base_adjust_var, width=6, justify='center')
+        self.base_adjust_entry.pack(side=tk.LEFT, padx=5)
+        self.base_adjust_entry.bind('<Return>', lambda e: self.global_base_adjust_custom())
+
+        ttk.Button(base_adj_control, text="+5°", width=5,
+                  command=lambda: self.global_base_adjust(5)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(base_adj_control, text="+10°", width=5,
+                  command=lambda: self.global_base_adjust(10)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(base_adj_control, text="+20°", width=5,
+                  command=lambda: self.global_base_adjust(20)).pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(base_adj_control, text="Apply", width=8,
+                  command=self.global_base_adjust_custom, style='Accent.TButton').pack(side=tk.LEFT, padx=5)
+
+        self.base_adjust_status = ttk.Label(base_adj_frame, text="No adjustment applied", foreground='gray', font=('Helvetica', 7))
+        self.base_adjust_status.pack(anchor='w', pady=3)
+
+        ttk.Label(base_adj_frame, text="⚠️ This modifies the sequences file", font=('Helvetica', 7), foreground='orange').pack(anchor='w')
 
     def update_detection_display(self, cell=None):
         """Update the static detection status display"""
