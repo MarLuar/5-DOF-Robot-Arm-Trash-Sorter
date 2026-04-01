@@ -369,6 +369,40 @@ class UnifiedControlSystem:
         ttk.Button(preset_frame, text="Copy Current Angles", command=self.copy_current_angles).pack(fill=tk.X, pady=2)
         ttk.Button(preset_frame, text="Paste to Manual Control", command=self.paste_to_manual).pack(fill=tk.X, pady=2)
 
+        # Global Base Adjustment
+        base_adj_frame = ttk.LabelFrame(preset_frame, text="Global Base Adjustment", padding="5")
+        base_adj_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(base_adj_frame, text="Adjust all base angles in sequences:", font=('Helvetica', 8)).pack(anchor='w')
+
+        base_adj_control = ttk.Frame(base_adj_frame)
+        base_adj_control.pack(fill=tk.X, pady=3)
+
+        ttk.Button(base_adj_control, text="-20°", width=5,
+                  command=lambda: self.global_base_adjust(-20)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(base_adj_control, text="-10°", width=5,
+                  command=lambda: self.global_base_adjust(-10)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(base_adj_control, text="-5°", width=5,
+                  command=lambda: self.global_base_adjust(-5)).pack(side=tk.LEFT, padx=2)
+
+        self.base_adjust_var = tk.StringVar(value="0")
+        self.base_adjust_entry = ttk.Entry(base_adj_control, textvariable=self.base_adjust_var, width=6, justify='center')
+        self.base_adjust_entry.pack(side=tk.LEFT, padx=5)
+        self.base_adjust_entry.bind('<Return>', lambda e: self.global_base_adjust_custom())
+
+        ttk.Button(base_adj_control, text="+5°", width=5,
+                  command=lambda: self.global_base_adjust(5)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(base_adj_control, text="+10°", width=5,
+                  command=lambda: self.global_base_adjust(10)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(base_adj_control, text="+20°", width=5,
+                  command=lambda: self.global_base_adjust(20)).pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(base_adj_control, text="Apply", width=8,
+                  command=self.global_base_adjust_custom, style='Accent.TButton').pack(side=tk.LEFT, padx=5)
+
+        self.base_adjust_status = ttk.Label(base_adj_frame, text="No adjustment applied", foreground='gray', font=('Helvetica', 7))
+        self.base_adjust_status.pack(anchor='w', pady=2)
+
         # Speed
         speed_frame = ttk.LabelFrame(right_frame, text="Movement Speed", padding="5")
         speed_frame.pack(fill=tk.X, pady=5)
@@ -1460,6 +1494,91 @@ class UnifiedControlSystem:
 
         self.log(f"Pasted to Manual Control: {angles}")
         messagebox.showinfo("Pasted!", f"Angles pasted to Manual Control:\n{angles}\n\nClick 'Send' on any servo to move to this position")
+
+    # Global Base Adjustment Methods
+    def global_base_adjust(self, amount):
+        """Adjust all base angles in all sequences by a fixed amount"""
+        try:
+            self.base_adjust_var.set(str(amount))
+            self.global_base_adjust_custom()
+        except Exception as e:
+            self.log(f"Base adjustment error: {e}")
+
+    def global_base_adjust_custom(self):
+        """Apply global base adjustment to all sequences"""
+        try:
+            amount = int(self.base_adjust_var.get())
+
+            # Confirm with user
+            confirm = messagebox.askyesno(
+                "Confirm Global Base Adjustment",
+                f"Adjust ALL base angles in ALL sequences by {amount:+d}°?\n\n"
+                f"This will modify the saved sequences file.\n"
+                f"Base angles will be clamped to 0-180°."
+            )
+
+            if not confirm:
+                return
+
+            # Load sequences
+            if not os.path.exists(SEQUENCES_FILE):
+                messagebox.showerror("Error", "Sequences file not found")
+                return
+
+            with open(SEQUENCES_FILE, 'r') as f:
+                sequences = json.load(f)
+
+            # Count adjustments
+            total_adjusted = 0
+            modified_sequences = []
+
+            for seq_name, steps in sequences.items():
+                seq_modified = False
+                for step in steps:
+                    if 'angles' in step and len(step['angles']) >= 1:
+                        old_base = step['angles'][0]
+                        new_base = max(0, min(180, old_base + amount))  # Clamp to 0-180
+                        if new_base != old_base:
+                            step['angles'][0] = new_base
+                            seq_modified = True
+                            total_adjusted += 1
+
+                if seq_modified:
+                    modified_sequences.append(seq_name)
+
+            # Save modified sequences
+            with open(SEQUENCES_FILE, 'w') as f:
+                json.dump(sequences, f, indent=2)
+
+            # Update status
+            if total_adjusted > 0:
+                self.base_adjust_status.config(
+                    text=f"Applied: {amount:+d}° to {total_adjusted} steps in {len(modified_sequences)} sequences",
+                    foreground='green'
+                )
+                self.log(f"Global base adjustment: {amount:+d}° applied to {total_adjusted} steps")
+                if modified_sequences:
+                    self.log(f"Modified sequences: {', '.join(modified_sequences[:5])}{'...' if len(modified_sequences) > 5 else ''}")
+                messagebox.showinfo(
+                    "Base Adjustment Complete",
+                    f"Successfully adjusted {total_adjusted} base angles by {amount:+d}°\n"
+                    f"Modified sequences: {len(modified_sequences)}"
+                )
+            else:
+                self.base_adjust_status.config(
+                    text=f"No changes needed (amount: {amount:+d}°)",
+                    foreground='gray'
+                )
+                self.log(f"Global base adjustment: No changes needed")
+
+            # Reload sequences
+            self.load_sequences()
+
+        except ValueError:
+            messagebox.showerror("Error", "Please enter a valid number")
+        except Exception as e:
+            self.log(f"Base adjustment error: {e}")
+            messagebox.showerror("Error", f"Failed to adjust base angles: {e}")
 
     # Auto-Offset Ratio Methods (for grid alignment)
     def adjust_offset_ratio(self, amount):
