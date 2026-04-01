@@ -168,7 +168,7 @@ class UnifiedControlSystem:
         self.last_command_time = 0
 
         # Auto-offset ratio setting (compensates for trash between grids)
-        self.offset_ratio_var = tk.DoubleVar(value=0.5)  # For every 0.5° error, adjust 1° (high sensitivity)
+        self.offset_ratio_var = tk.DoubleVar(value=1.0)  # For every 1° error, adjust 1° (normal sensitivity)
         self.auto_offset_suggestions = []  # List of (offset, confidence, reason) tuples
         self.last_offset_analysis_time = 0
         self.offset_analysis_interval = 0.5  # Analyze every 0.5 seconds (2 Hz) for fast response
@@ -394,7 +394,7 @@ class UnifiedControlSystem:
         ttk.Button(ratio_control_frame, text="-0.1", width=5,
                   command=lambda: self.adjust_offset_ratio(-0.1)).pack(side=tk.LEFT, padx=2)
 
-        self.offset_ratio_var = tk.DoubleVar(value=0.5)
+        self.offset_ratio_var = tk.DoubleVar(value=1.0)
         self.offset_ratio_entry = ttk.Entry(ratio_control_frame, textvariable=self.offset_ratio_var,
                                       width=8, justify='center')
         self.offset_ratio_entry.pack(side=tk.LEFT, padx=5)
@@ -405,7 +405,7 @@ class UnifiedControlSystem:
         ttk.Button(ratio_control_frame, text="+0.5", width=5,
                   command=lambda: self.adjust_offset_ratio(0.5)).pack(side=tk.LEFT, padx=2)
 
-        self.offset_ratio_status = ttk.Label(offset_ratio_frame, text="Ratio: 1:0.5 (High sensitivity)",
+        self.offset_ratio_status = ttk.Label(offset_ratio_frame, text="Ratio: 1:1.0 (Normal sensitivity)",
                                              foreground='blue', font=('Helvetica', 8))
         self.offset_ratio_status.pack(pady=3)
 
@@ -575,7 +575,7 @@ class UnifiedControlSystem:
         ttk.Button(ratio_calib_control, text="+0.5", width=4,
                   command=lambda: self.adjust_offset_ratio(0.5)).pack(side=tk.LEFT, padx=1)
 
-        self.calib_offset_ratio_status = ttk.Label(offset_ratio_calib_frame, text="Ratio: 1:0.5 (High sensitivity)",
+        self.calib_offset_ratio_status = ttk.Label(offset_ratio_calib_frame, text="Ratio: 1:1.0 (Normal sensitivity)",
                                              foreground='blue', font=('Helvetica', 7))
         self.calib_offset_ratio_status.pack(pady=2)
 
@@ -1486,10 +1486,12 @@ class UnifiedControlSystem:
     def update_offset_ratio_display(self):
         """Update offset ratio status labels"""
         ratio = self.offset_ratio_var.get()
-        if ratio < 1.0:
+        if ratio < 0.5:
             sensitivity = "Very High"
-        elif ratio < 2.0:
+        elif ratio < 1.0:
             sensitivity = "High"
+        elif ratio < 2.0:
+            sensitivity = "Normal"
         elif ratio < 3.0:
             sensitivity = "Medium"
         elif ratio < 5.0:
@@ -2081,8 +2083,20 @@ class UnifiedControlSystem:
                     # Apply auto-offset to steps 3 and 4 only (indices 2 and 3)
                     angles_with_offset = self.apply_offset_to_sequence_step(angles, i, len(self.sequences[seq_name]))
 
-                    delay = step.get('delay', 1000)
+                    # Use 15ms delay for fast transitions: step 2->3 (i=1) and step 4->5 (i=3)
+                    if i in [1, 3]:
+                        delay = 15
+                    else:
+                        delay = step.get('delay', 1000)
                     step_start = time.time()
+
+                    # For steps 3 and 5 (indices 2 and 4), use 3x slower speed
+                    current_speed = int(self.speed_var.get()) if hasattr(self, 'speed_var') else DEFAULT_SPEED
+                    if i in [2, 4]:  # Step 3 or Step 5 - use 3x slower speed
+                        slow_speed = current_speed * 3
+                        speed_command = f"99 {slow_speed}\n"
+                        self.send_to_arduino(speed_command)
+                        self._safe_after(0, lambda s=slow_speed: self.log(f"  → Speed changed to {s}ms/deg (3x slower for step {i+1})"))
 
                     # Update step 3 & 4 base value display (show same offset for both)
                     if i in [2, 3]:  # Steps 3 or 4
@@ -2106,6 +2120,12 @@ class UnifiedControlSystem:
                         if getattr(self, '_stop_sequence_flag', False):
                             break
                         time.sleep(0.1)
+
+                    # Restore original speed after steps 3 and 5 (indices 2 and 4)
+                    if i in [2, 4]:  # After Step 3 or Step 5 completes
+                        speed_command = f"99 {current_speed}\n"
+                        self.send_to_arduino(speed_command)
+                        self._safe_after(0, lambda s=current_speed: self.log(f"  → Speed restored to {s}ms/deg"))
 
                     step_elapsed = time.time() - step_start
                     if step_elapsed > 0.6:
@@ -2836,8 +2856,20 @@ class UnifiedControlSystem:
                     # Apply auto-offset to steps 3 and 4 only (indices 2 and 3)
                     angles = self.apply_offset_to_sequence_step(angles_original, i, len(self.sequences[cell]))
 
-                    delay = step.get('delay', 1000)
+                    # Use 15ms delay for fast transitions: step 2->3 (i=1) and step 4->5 (i=3)
+                    if i in [1, 3]:
+                        delay = 15
+                    else:
+                        delay = step.get('delay', 1000)
                     step_start = time.time()
+
+                    # For steps 3 and 5 (indices 2 and 4), use 3x slower speed
+                    current_speed = int(self.speed_var.get()) if hasattr(self, 'speed_var') else DEFAULT_SPEED
+                    if i in [2, 4]:  # Step 3 or Step 5 - use 3x slower speed
+                        slow_speed = current_speed * 3
+                        speed_command = f"99 {slow_speed}\n"
+                        self.send_to_arduino(speed_command)
+                        self._safe_after(0, lambda s=slow_speed: self.log(f"  → Speed changed to {s}ms/deg (3x slower for step {i+1})"))
 
                     # Update step 3 & 4 base value display (show same offset for both)
                     if i in [2, 3]:  # Steps 3 or 4
@@ -2863,6 +2895,12 @@ class UnifiedControlSystem:
                         if getattr(self, '_stop_sequence_flag', False):
                             break
                         time.sleep(0.1)
+
+                    # Restore original speed after steps 3 and 5 (indices 2 and 4)
+                    if i in [2, 4]:  # After Step 3 or Step 5 completes
+                        speed_command = f"99 {current_speed}\n"
+                        self.send_to_arduino(speed_command)
+                        self._safe_after(0, lambda s=current_speed: self.log(f"  → Speed restored to {s}ms/deg"))
 
                     step_elapsed = time.time() - step_start
                     if step_elapsed > 0.6:
