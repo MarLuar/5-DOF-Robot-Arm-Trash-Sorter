@@ -3809,11 +3809,16 @@ class UnifiedControlSystem:
         with open(SEQUENCES_FILE, 'w') as f:
             json.dump(self.sequences, f, indent=2)
 
-        # Update cell list
+        # Update cell list (show both original and _NON variants)
         self.cell_listbox.delete(0, tk.END)
         for cell in CELL_NAMES:
             has_seq = "[OK]" if cell in self.sequences else ""
             self.cell_listbox.insert(tk.END, f"{cell} {has_seq}")
+        # Show NON variants
+        for cell in CELL_NAMES:
+            non_cell = f"{cell}_NON"
+            has_seq = "[OK]" if non_cell in self.sequences else ""
+            self.cell_listbox.insert(tk.END, f"{non_cell} {has_seq}")
 
         # Refresh sequence listbox in Manual Control tab
         self.refresh_seq_list()
