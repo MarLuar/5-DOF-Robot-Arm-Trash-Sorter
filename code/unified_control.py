@@ -2551,7 +2551,7 @@ class UnifiedControlSystem:
                 # Check if cell has a sequence and is A, B, or C (not D)
                 if cell in self.sequences and cell[0] in ['A', 'B', 'C']:
                     self.current_detection_cell = cell
-                    self.pickup_btn.config(state='normal')
+                    
 
                     # Auto-pickup logic - use current averaged offset (no additional sampling wait)
                     if self.auto_pickup_enabled and self.auto_pickup_running:
@@ -2592,7 +2592,7 @@ class UnifiedControlSystem:
                         self.update_detection_display(cell)
                 else:
                     self.current_detection_cell = None
-                    self.pickup_btn.config(state='disabled')
+                    
                     if self.auto_pickup_enabled and self.auto_pickup_running:
                         self.pending_pickup_cell = None
                         self.object_first_detected_time = 0
@@ -2610,7 +2610,7 @@ class UnifiedControlSystem:
             else:
                 # No object detected or timeout expired
                 self.current_detection_cell = None
-                self.pickup_btn.config(state='disabled')
+                
                 if self.auto_pickup_enabled and self.auto_pickup_running:
                     self.pending_pickup_cell = None
                     self.object_first_detected_time = 0
@@ -2828,7 +2828,7 @@ class UnifiedControlSystem:
             self.auto_pickup_enabled = False
             self.auto_pickup_running = False
             self.pending_pickup_cell = None
-            self.pickup_btn.config(state='disabled')
+            
             self.auto_pickup_chk.config(state='disabled')
             self.detection_status_label.config(text="No object detected", foreground='gray')
 
@@ -3102,7 +3102,7 @@ class UnifiedControlSystem:
 
         # Execute sequence in background thread
         self.log(f"[AUTO] Starting automatic pickup for {execute_cell}...")
-        self.pickup_btn.config(state='disabled')
+        
 
         # Set stop flag for any currently playing sequence
         self._stop_sequence_flag = True
@@ -3144,7 +3144,7 @@ class UnifiedControlSystem:
 
         # Execute sequence in background thread
         self.log(f"Starting pickup sequence for {cell}...")
-        self.pickup_btn.config(state='disabled')
+        
 
         # Set stop flag for any currently playing sequence
         self._stop_sequence_flag = True
@@ -3231,7 +3231,7 @@ class UnifiedControlSystem:
 
         except Exception as e:
             self._safe_after(0, lambda: self.log(f"Pickup error: {e}"))
-            self._safe_after(0, lambda: self.pickup_btn.config(state='normal'))
+            self._safe_after(0, lambda: 
         finally:
             # Clean up thread reference
             if hasattr(self, '_current_pickup_thread'):
@@ -3256,7 +3256,7 @@ class UnifiedControlSystem:
         """Clear detection state after successful pickup"""
         self.detected_objects = []
         self.current_detection_cell = None
-        self.pickup_btn.config(state='disabled')
+        
         # Reset cell hysteresis
         self.cell_confirmed = None
         self.cell_confirmation_count = 0
