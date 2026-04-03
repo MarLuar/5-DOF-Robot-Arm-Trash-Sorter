@@ -155,6 +155,14 @@ class UnifiedControlSystem:
         self.classifier_loaded = False
         self.classification_results = {}  # cell -> (class_name, confidence)
 
+        # Classification smoothing (prevents flickering)
+        self.classification_history = []  # List of (class_name, confidence) tuples
+        self.classification_history_size = 10  # Keep last 10 classifications
+        self.classification_confirmed = None  # Last confirmed classification
+        self.classification_confirmation_threshold = 6  # Need 6/10 votes to confirm
+        self.classification_last_update = 0  # Timestamp of last display update
+        self.classification_update_interval = 1.0  # Update display at most every 1 second
+
         # Performance optimizations
         self.serial_lock = threading.Lock()  # Thread-safe serial access
         self.frame_count = 0  # For frame skipping
@@ -2106,11 +2114,19 @@ class UnifiedControlSystem:
                                 self.cell_confirmed = detected_cell_name
                                 self.cell_confirmation_count = 1
                                 self.log(f"Object detected in {detected_cell_name}")
+                                # Clear classification history for new object position
+                                self.classification_history = []
+                                self.classification_confirmed = None
                             else:
                                 self.cell_confirmation_count += 1
                                 detected['cell'] = self.cell_confirmed if self.cell_confirmed else detected_cell_name
 
                         self.last_detected_cell = detected
+                    else:
+                        # No objects detected - clear classification history
+                        self.classification_history = []
+                        self.classification_confirmed = None
+                        self.last_detected_cell = None
 
                 has_detection = hasattr(self, 'last_detected_cell') and self.last_detected_cell is not None
                 if has_detection and time.time() - self.last_detection_time < self.detection_timeout:
@@ -2844,10 +2860,12 @@ class UnifiedControlSystem:
         else:
             self.classification_status_label.config(text="Classification: Off", foreground='gray')
             self.classification_results = {}
+            self.classification_history = []
+            self.classification_confirmed = None
             self.log("Waste classification disabled")
 
     def classify_detected_object(self, frame, obj):
-        """Classify a detected object using the waste classifier
+        """Classify a detected object using the waste classifier with temporal smoothing
 
         Args:
             frame: Original camera frame (BGR)
@@ -2862,7 +2880,39 @@ class UnifiedControlSystem:
         try:
             bbox = (obj['x'], obj['y'], obj['w'], obj['h'])
             class_name, confidence = self.waste_classifier.classify(frame, bbox)
-            return class_name, confidence
+
+            # Add to history
+            self.classification_history.append((class_name, confidence))
+
+            # Keep only last N classifications
+            if len(self.classification_history) > self.classification_history_size:
+                self.classification_history = self.classification_history[-self.classification_history_size:]
+
+            # Majority vote from history
+            bio_count = sum(1 for c, _ in self.classification_history if c == 'biodegradable')
+            nonbio_count = sum(1 for c, _ in self.classification_history if c == 'non-biodegradable')
+            total = len(self.classification_history)
+
+            # Calculate average confidence for each class
+            bio_conf = sum(conf for c, conf in self.classification_history if c == 'biodegradable') / max(bio_count, 1)
+            nonbio_conf = sum(conf for c, conf in self.classification_history if c == 'non-biodegradable') / max(nonbio_count, 1)
+
+            # Determine confirmed classification
+            if bio_count >= self.classification_confirmation_threshold:
+                self.classification_confirmed = ('biodegradable', bio_conf)
+                if len(self.classification_history) == self.classification_history_size:
+                    self.log(f"[Class] BIO confirmed: {bio_count}/{total} votes, conf={bio_conf:.0%}")
+            elif nonbio_count >= self.classification_confirmation_threshold:
+                self.classification_confirmed = ('non-biodegradable', nonbio_conf)
+                if len(self.classification_history) == self.classification_history_size:
+                    self.log(f"[Class] NON-BIO confirmed: {nonbio_count}/{total} votes, conf={nonbio_conf:.0%}")
+            # If no majority, keep previous confirmed result (prevents flickering)
+            # Only show 'Unknown' if history is too short
+            elif total < 3:
+                self.classification_confirmed = ('Unknown', 0.0)
+
+            return self.classification_confirmed
+
         except Exception as e:
             self.log(f"Classification error: {e}")
             return 'Unknown', 0.0
