@@ -3041,14 +3041,56 @@ class UnifiedControlSystem:
             )
 
     def auto_trigger_pickup(self):
-        """Automatically trigger pickup without confirmation dialog"""
+        """Automatically trigger pickup without confirmation dialog.
+        If waste classification is enabled, classify object and choose
+        original (BIO) or _NON variant accordingly."""
         if not self.current_detection_cell:
             return
 
         cell = self.current_detection_cell
 
-        if cell not in self.sequences:
-            self.log(f"[AUTO] No sequence for {cell}, skipping")
+        # Determine which sequence to execute based on waste classification
+        execute_cell = cell
+
+        if self.waste_classify_var.get() and self.classifier_loaded:
+            # Classify the detected object
+            if hasattr(self, 'last_detected_cell') and self.last_detected_cell:
+                obj = self.last_detected_cell
+
+                # Grab current frame for classification
+                if self.cap and self.cap.isOpened():
+                    ret, frame = self.cap.read()
+                    if ret:
+                        class_name, confidence = self.classify_detected_object(frame, obj)
+                        self.log(f"[AUTO] Classification: {class_name} ({confidence:.0%})")
+
+                        # Determine which sequence to use
+                        base_cell = cell.replace('_NON', '')  # Get base cell (e.g., A1 from A1_NON)
+
+                        if class_name == 'non-biodegradable':
+                            # Use NON variant
+                            non_cell = f"{base_cell}_NON"
+                            if non_cell in self.sequences:
+                                execute_cell = non_cell
+                                self.log(f"[AUTO] NON-BIO detected -> using {execute_cell} sequence")
+                            else:
+                                self.log(f"[AUTO] NON-BIO detected but {non_cell} not found, falling back to {cell}")
+                        else:
+                            # BIO or unknown -> use original cell
+                            execute_cell = base_cell
+                            if base_cell in self.sequences:
+                                self.log(f"[AUTO] BIO detected -> using {execute_cell} sequence")
+                            else:
+                                self.log(f"[AUTO] {base_cell} not found, falling back to {cell}")
+                    else:
+                        self.log("[AUTO] Could not grab frame for classification")
+                else:
+                    self.log("[AUTO] Camera not available for classification")
+            else:
+                self.log("[AUTO] No detected object info for classification")
+
+        if execute_cell not in self.sequences:
+            self.log(f"[AUTO] No sequence for {execute_cell}, skipping")
             return
 
         if not self.is_connected:
@@ -3060,7 +3102,7 @@ class UnifiedControlSystem:
         self._cancel_pending_callbacks()
 
         # Execute sequence in background thread
-        self.log(f"[AUTO] Starting automatic pickup for {cell}...")
+        self.log(f"[AUTO] Starting automatic pickup for {execute_cell}...")
         self.pickup_btn.config(state='disabled')
 
         # Set stop flag for any currently playing sequence
@@ -3069,7 +3111,7 @@ class UnifiedControlSystem:
 
         # Start new pickup sequence
         self._stop_sequence_flag = False
-        thread = threading.Thread(target=self._execute_pickup_sequence, args=(cell,), daemon=True)
+        thread = threading.Thread(target=self._execute_pickup_sequence, args=(execute_cell,), daemon=True)
         thread.start()
 
     def pickup_detected_object(self):
