@@ -150,6 +150,11 @@ class UnifiedControlSystem:
         self.pending_pickup_cell = None  # Cell waiting for confirmation
         self.object_confirmation_delay = 4.0  # Object must be present for 4 seconds before auto pickup
 
+        # Waste classification
+        self.waste_classifier = None
+        self.classifier_loaded = False
+        self.classification_results = {}  # cell -> (class_name, confidence)
+
         # Performance optimizations
         self.serial_lock = threading.Lock()  # Thread-safe serial access
         self.frame_count = 0  # For frame skipping
@@ -475,6 +480,16 @@ class UnifiedControlSystem:
         ttk.Checkbutton(btn_frame, text="Show Object Detection",
                        variable=self.detect_in_calib_var,
                        command=self.toggle_detection_in_calib).pack(side=tk.LEFT, padx=10)
+
+        # Waste classification toggle
+        self.waste_classify_var = tk.BooleanVar(value=False)
+        self.waste_classify_chk = ttk.Checkbutton(btn_frame, text="Enable Waste Classification",
+                       variable=self.waste_classify_var,
+                       command=self.toggle_waste_classification)
+        self.waste_classify_chk.pack(side=tk.LEFT, padx=10)
+
+        self.classification_status_label = ttk.Label(btn_frame, text="Classification: Off", foreground='gray', font=('Helvetica', 8))
+        self.classification_status_label.pack(side=tk.LEFT, padx=5)
 
         # Pickup button (initially disabled)
         self.pickup_btn = ttk.Button(btn_frame, text="PICKUP OBJECT", command=self.pickup_detected_object, state='disabled')
@@ -2105,16 +2120,53 @@ class UnifiedControlSystem:
                     disp_w = int(obj['w'] * scale)
                     disp_h = int(obj['h'] * scale)
 
-                    cv2.rectangle(bg, (disp_x, disp_y), (disp_x+disp_w, disp_y+disp_h), (0, 255, 255), 2)
+                    # Classify object if waste classification is enabled
+                    class_name = None
+                    confidence = 0.0
+                    box_color = (0, 255, 255)  # Default yellow
+
+                    if self.waste_classify_var.get() and self.classifier_loaded:
+                        # Classify using original frame coordinates
+                        class_name, confidence = self.classify_detected_object(frame, obj)
+                        self.classification_results[obj.get('cell', '?')] = (class_name, confidence)
+
+                        # Set color based on classification
+                        if class_name == 'biodegradable':
+                            box_color = (0, 255, 0)  # Green
+                        elif class_name == 'non-biodegradable':
+                            box_color = (0, 0, 255)  # Red
+                        else:
+                            box_color = (0, 255, 255)  # Yellow (unknown)
+                    else:
+                        box_color = (0, 255, 255)  # Yellow when classification disabled
+
+                    cv2.rectangle(bg, (disp_x, disp_y), (disp_x+disp_w, disp_y+disp_h), box_color, 2)
 
                     cell = obj.get('cell', '?')
                     area = obj.get('area', 0)
                     solidity = obj.get('solidity', 0)
                     threshold = self.threshold_var.get()
 
-                    info_text = f"{cell} | {area:.0f}px | S:{solidity:.2f} | Th:{threshold}"
+                    # Build info text
+                    info_text = f"{cell} | {area:.0f}px | S:{solidity:.2f}"
+                    if class_name and confidence > 0:
+                        info_text += f" | {class_name[:4]}:{confidence:.0%}"
+                    info_text += f" | Th:{threshold}"
+
                     cv2.putText(bg, info_text, (disp_x, disp_y-10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, box_color, 2)
+
+                    # Update detection status label
+                    if class_name and confidence > 0:
+                        self.detection_status_label.config(
+                            text=f"{cell}: {class_name} ({confidence:.0%})",
+                            foreground='green' if class_name == 'biodegradable' else 'red'
+                        )
+                    else:
+                        self.detection_status_label.config(
+                            text=f"{cell} detected",
+                            foreground='yellow'
+                        )
 
             # Convert BGR to RGB
             bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
@@ -2765,6 +2817,55 @@ class UnifiedControlSystem:
             self.pickup_btn.config(state='disabled')
             self.auto_pickup_chk.config(state='disabled')
             self.detection_status_label.config(text="No object detected", foreground='gray')
+
+    def toggle_waste_classification(self):
+        """Toggle waste classification on/off"""
+        enabled = self.waste_classify_var.get()
+        if enabled:
+            if not self.classifier_loaded:
+                self.log("Loading waste classifier...")
+                try:
+                    import sys
+                    sys.path.insert(0, '/home/koogs/Documents/5DOF_Robotic_Arm_Vision')
+                    from waste_classifier import WasteClassifier
+                    self.waste_classifier = WasteClassifier()
+                    self.classifier_loaded = True
+                    self.classification_status_label.config(text="Classification: Ready", foreground='green')
+                    self.log("Waste classifier loaded successfully")
+                except Exception as e:
+                    self.log(f"Failed to load waste classifier: {e}")
+                    self.waste_classify_var.set(False)
+                    self.classification_status_label.config(text="Classification: Error", foreground='red')
+                    messagebox.showerror("Error", f"Could not load waste classifier:\n{e}")
+                    return
+            else:
+                self.classification_status_label.config(text="Classification: Ready", foreground='green')
+                self.log("Waste classification enabled")
+        else:
+            self.classification_status_label.config(text="Classification: Off", foreground='gray')
+            self.classification_results = {}
+            self.log("Waste classification disabled")
+
+    def classify_detected_object(self, frame, obj):
+        """Classify a detected object using the waste classifier
+
+        Args:
+            frame: Original camera frame (BGR)
+            obj: Detection dict with x, y, w, h keys
+
+        Returns:
+            tuple: (class_name, confidence) or ('Unknown', 0.0)
+        """
+        if not self.classifier_loaded or self.waste_classifier is None:
+            return 'Unknown', 0.0
+
+        try:
+            bbox = (obj['x'], obj['y'], obj['w'], obj['h'])
+            class_name, confidence = self.waste_classifier.classify(frame, bbox)
+            return class_name, confidence
+        except Exception as e:
+            self.log(f"Classification error: {e}")
+            return 'Unknown', 0.0
 
     def init_camera_settings(self):
         """Initialize camera settings on startup"""
