@@ -496,9 +496,6 @@ class UnifiedControlSystem:
                        command=self.toggle_waste_classification)
         self.waste_classify_chk.pack(side=tk.LEFT, padx=10)
 
-        self.classification_status_label = ttk.Label(btn_frame, text="Classification: Off", foreground='gray', font=('Helvetica', 8))
-        self.classification_status_label.pack(side=tk.LEFT, padx=5)
-
         # Pickup button (initially disabled)
         self.pickup_btn = ttk.Button(btn_frame, text="PICKUP OBJECT", command=self.pickup_detected_object, state='disabled')
         self.pickup_btn.pack(side=tk.LEFT, padx=10)
@@ -510,6 +507,15 @@ class UnifiedControlSystem:
                        command=self.toggle_auto_pickup)
         self.auto_pickup_chk.pack(side=tk.LEFT, padx=10)
         self.auto_pickup_chk.config(state='disabled')  # Disabled until calibrated
+
+        # Auto-Offset toggle (moved from right panel)
+        self.auto_offset_btn_frame = ttk.Frame(btn_frame)
+        self.auto_offset_btn_frame.pack(side=tk.LEFT, padx=10)
+        self.auto_offset_enabled_var = tk.BooleanVar(value=False)
+        self.auto_offset_chk = ttk.Checkbutton(self.auto_offset_btn_frame, text="Auto Analysis",
+                       variable=self.auto_offset_enabled_var,
+                       command=self.toggle_auto_offset_suggestions)
+        self.auto_offset_chk.pack(side=tk.LEFT)
 
         # Detection status label
         self.detection_status_label = ttk.Label(btn_frame, text="No object detected", foreground='gray')
@@ -565,13 +571,6 @@ class UnifiedControlSystem:
                   command=self.apply_suggested_offset, width=10).pack(side=tk.LEFT, padx=2)
         ttk.Button(auto_offset_btn_frame, text="Analyze",
                   command=self.analyze_offset_suggestion, width=10).pack(side=tk.LEFT, padx=2)
-
-        self.auto_offset_enabled_var = tk.BooleanVar(value=False)
-        self.auto_offset_check = ttk.Checkbutton(auto_offset_frame,
-                                                 text="Enable auto-analysis",
-                                                 variable=self.auto_offset_enabled_var,
-                                                 command=self.toggle_auto_offset_suggestions)
-        self.auto_offset_check.pack(pady=2)
 
         # Offset Ratio Setting (compact)
         offset_ratio_calib_frame = ttk.LabelFrame(self.right_panel, text="Auto-Offset Ratio", padding="5")
@@ -2846,19 +2845,15 @@ class UnifiedControlSystem:
                     from waste_classifier import WasteClassifier
                     self.waste_classifier = WasteClassifier()
                     self.classifier_loaded = True
-                    self.classification_status_label.config(text="Classification: Ready", foreground='green')
                     self.log("Waste classifier loaded successfully")
                 except Exception as e:
                     self.log(f"Failed to load waste classifier: {e}")
                     self.waste_classify_var.set(False)
-                    self.classification_status_label.config(text="Classification: Error", foreground='red')
                     messagebox.showerror("Error", f"Could not load waste classifier:\n{e}")
                     return
             else:
-                self.classification_status_label.config(text="Classification: Ready", foreground='green')
                 self.log("Waste classification enabled")
         else:
-            self.classification_status_label.config(text="Classification: Off", foreground='gray')
             self.classification_results = {}
             self.classification_history = []
             self.classification_confirmed = None
