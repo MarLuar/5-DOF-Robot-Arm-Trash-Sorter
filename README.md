@@ -1,14 +1,14 @@
-# 5-DOF Robotic Arm with Computer Vision Pickup
+# 5-DOF Robotic Arm with Computer Vision Pickup and Waste Classification
 
-**Version 1.1.00**
+**Version 1.2.00**
 
-**Capstone Project - Automated Trash Pickup System**
+**Capstone Project - Automated Trash Sorting System**
 
 ---
 
 ## Project Overview
 
-This system enables a 5-DOF robotic arm to automatically detect and pickup trash using computer vision. The arm identifies objects on a 4x4 grid platform and executes pre-recorded pickup sequences for each cell.
+This system enables a 5-DOF robotic arm to automatically detect, classify, and pickup trash using computer vision and machine learning. The arm identifies objects on a 4x4 grid platform, classifies them as biodegradable or non-biodegradable, and executes the appropriate pickup sequence for sorting.
 
 ---
 
@@ -20,14 +20,16 @@ This system enables a 5-DOF robotic arm to automatically detect and pickup trash
 - Speed control for servo movements
 - Preset positions (Rest, Pickup)
 - Copy/paste angles to sequences
+- Global base adjustment for all sequences
 
 ### Sequence Management
-- Create sequences for each grid cell (A1-D4)
+- Create sequences for each grid cell (A1-D4 and A1_NON-D4_NON)
 - Insert steps at specific positions
 - Copy/paste between cells
 - Copy from Manual Control
 - Right-click context menu (Copy, Cut, Paste, Delete)
 - Save/load sequences to file
+- Global base adjustment (adjust all base angles across all sequences)
 
 ### Grid Calibration
 - 4-corner calibration (click corners)
@@ -38,15 +40,26 @@ This system enables a 5-DOF robotic arm to automatically detect and pickup trash
 
 ### Object Detection
 - Background subtraction detection
+- Gaussian blur for noise reduction
 - Cell identification (A1, B2, C3, etc.)
 - Real-time detection display
-- Persistent detection (3 second timeout, no flickering)
+- Persistent detection (8 second timeout, no flickering)
+- Cell hysteresis (prevents cell jumping)
 - Sensitivity adjustment
 
-### Automatic Pickup
+### Waste Classification
+- TensorFlow/Keras-based biodegradable vs non-biodegradable classifier
+- Real-time classification overlay on camera feed
+- Color-coded bounding boxes (green = biodegradable, red = non-biodegradable)
+- Temporal smoothing (10-frame history, majority voting)
+- Classification confidence display
+
+### Automatic Pickup with Classification
 - Detect object on grid
-- Identify cell location
-- Execute cell's assigned sequence automatically
+- Classify object as biodegradable or non-biodegradable
+- Execute appropriate sequence:
+  - Biodegradable: original cell sequence (e.g., A1)
+  - Non-biodegradable: NON variant sequence (e.g., A1_NON)
 - Auto-recapture empty grid after successful pickup
 - Ready for next object immediately
 
@@ -55,6 +68,7 @@ This system enables a 5-DOF robotic arm to automatically detect and pickup trash
 - Static detection status display
 - Real-time command logging
 - Thread and performance monitoring
+- Step execution timing
 
 ---
 
@@ -63,7 +77,6 @@ This system enables a 5-DOF robotic arm to automatically detect and pickup trash
 ```
 5DOF_Robotic_Arm_Vision/
 ├── README.md                     # This file
-├── WORK_REPORT_March_29-30_2025.txt  # Work report
 ├── run.sh                        # Quick start menu
 │
 ├── code/                         # Main Python scripts
@@ -73,19 +86,23 @@ This system enables a 5-DOF robotic arm to automatically detect and pickup trash
 │
 ├── calibration/                  # Calibration data
 │   ├── vision_calibration.json   # Grid calibration data
-│   └── servo_presets.json        # Servo preset positions
+│   ├── servo_presets.json        # Servo preset positions
+│   └── camera_config.json        # Camera settings
 │
 ├── sequences/                    # Recorded sequences
-│   └── cell_sequences.json       # Cell pickup sequences
+│   └── cell_sequences.json       # Cell pickup sequences (BIO and NON variants)
 │
-├── docs/                         # Documentation
-│   ├── PROJECT_TODO.md           # Project task list
-│   ├── VISION_SETUP.md           # Setup guide
-│   └── FILE_INVENTORY.md         # File inventory
+├── models/                       # Trained ML models
+│   ├── waste_classifier_best.h5  # Best model weights
+│   ├── waste_classifier_best.keras
+│   └── waste_classifier_inference.keras
 │
-└── firmware/                     # Arduino firmware
-    └── 5dof_robotic_arm/
-        └── 5dof_robotic_arm.ino  # Main Arduino sketch
+├── waste_classifier.py           # Waste classification model
+├── waste_detection_gui.py        # Standalone waste detection GUI
+├── train_waste_classifier.py     # Training script
+├── test_classifier.py            # Testing script
+├── create_inference_model.py     # Model optimization script
+└── convert_dataset.py            # Dataset conversion utility
 ```
 
 ---
@@ -97,8 +114,8 @@ This system enables a 5-DOF robotic arm to automatically detect and pickup trash
 ```bash
 cd /home/koogs/Documents/5DOF_Robotic_Arm_Vision
 
-# Install dependencies (if needed)
-pip3 install opencv-python numpy pyserial pillow psutil --break-system-packages
+# Install dependencies
+pip3 install opencv-python numpy pyserial pillow tensorflow --break-system-packages
 ```
 
 ### 2. Run Unified Control System
@@ -117,7 +134,7 @@ python3 code/unified_control.py
 
 **B. Create Sequences**
 1. Go to "Cell Sequences" tab
-2. Select cell (e.g., A1)
+2. Select cell (e.g., A1 for biodegradable, A1_NON for non-biodegradable)
 3. Move servos to desired position
 4. Click "Add Current" to add step
 5. Repeat for all steps
@@ -129,11 +146,12 @@ python3 code/unified_control.py
 3. Move servos individually or use presets
 4. Click "Send All" for simultaneous movement
 
-**D. Automatic Pickup**
-1. Place object on grid
-2. Wait for detection (shows cell name)
-3. Click "PICKUP OBJECT"
-4. Confirm and watch it execute!
+**D. Automatic Pickup with Classification**
+1. Enable "Show Object Detection"
+2. Enable "Enable Waste Classification"
+3. Enable "Auto Pickup"
+4. Place object on grid
+5. System classifies and executes appropriate sequence automatically
 
 ---
 
@@ -151,7 +169,7 @@ python3 code/unified_control.py
 - NumPy
 - PySerial
 - Pillow
-- psutil
+- TensorFlow/Keras
 
 ---
 
@@ -173,21 +191,34 @@ python3 code/unified_control.py
 
 ### Detection Settings
 - Color Threshold: 35 (adjustable)
-- Minimum Area: 3000 pixels (adjustable)
+- Minimum Area: 1300 pixels (adjustable)
 - Min Solidity: 0.5 (adjustable)
-- Detection FPS: 2 FPS (every 5th frame at 10 FPS camera)
-- Detection Persistence: 3 seconds
+- Gaussian Blur: 5x5 kernel (noise reduction)
+- Detection Persistence: 8 seconds
+
+### Classification Settings
+- Model: TensorFlow/Keras binary classifier
+- Classes: biodegradable, non-biodegradable
+- Temporal smoothing: 10-frame history
+- Confirmation threshold: 6/10 votes
+- Image size: 160x160 pixels
+
+### Auto-Offset Settings
+- Default ratio: 1:2.0 (medium sensitivity)
+- Range: 0.5 to 10.0
+- Applied to base servo for grid alignment
 
 ---
 
 ## Performance
 
-### Current Performance (Version 1.1.00)
+### Current Performance (Version 1.2.00)
 
 | Component | Performance | Status |
 |-----------|-------------|--------|
 | Camera FPS | 10 FPS | Excellent |
 | Detection FPS | 2 FPS | Stable |
+| Classification | Real-time with smoothing | Stable |
 | Sequence Playback | No lag | Excellent |
 | Serial Communication | Buffer managed | Excellent |
 | UI Responsiveness | Fully responsive | Excellent |
@@ -196,9 +227,11 @@ python3 code/unified_control.py
 - Camera runs in background thread (doesn't block UI)
 - Canvas size cached (instant access)
 - Serial buffers cleared before each send
-- Detection persists for 3 seconds (no flickering)
+- Detection persists for 8 seconds (no flickering)
+- Classification uses temporal smoothing (no flickering)
 - Event queue cleaned before each sequence
 - Threads properly terminated with stop flags
+- Gaussian blur reduces camera noise
 
 ---
 
@@ -216,6 +249,12 @@ python3 code/unified_control.py
 3. Adjust sensitivity (threshold, area, solidity)
 4. Ensure good lighting
 
+### Classification Unstable
+1. Ensure good lighting on object
+2. Increase classification confirmation threshold
+3. Check that model files exist in models/ directory
+4. Verify object is within camera view
+
 ### Sequence Lag
 1. Check Arduino connection
 2. Clear serial buffers (reconnect)
@@ -231,6 +270,31 @@ python3 code/unified_control.py
 ---
 
 ## Version History
+
+### Version 1.2.00 (April 1, 2025)
+
+**New Features:**
+- Waste classification (biodegradable vs non-biodegradable)
+- Auto-pickup with classification-based sequence selection
+- Global base adjustment for all sequences
+- Gaussian blur for camera noise reduction
+- Temporal smoothing for stable classification
+- Color-coded classification overlay on video
+- Standalone waste detection GUI
+- Auto-analysis checkbox in calibration tab
+
+**Improvements:**
+- Classification uses 10-frame history with majority voting
+- Detection persistence increased to 8 seconds
+- Cell hysteresis prevents cell jumping
+- Speed control for steps 3 and 5 (3x slower)
+- Fast transitions between steps (15ms delay)
+- Default auto-offset ratio changed to 2.0
+
+**Bug Fixes:**
+- Fixed NON sequences disappearing after save
+- Fixed missing _on_connect_error handler
+- Fixed classification flickering
 
 ### Version 1.1.00 (March 30, 2025)
 
@@ -266,18 +330,6 @@ python3 code/unified_control.py
 
 ---
 
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| `README.md` | Main project documentation |
-| `WORK_REPORT_March_29-30_2025.txt` | Detailed work report |
-| `docs/PROJECT_TODO.md` | Project task list |
-| `docs/VISION_SETUP.md` | Vision system setup guide |
-| `docs/FILE_INVENTORY.md` | File inventory |
-
----
-
 ## License
 
 This project is part of a capstone requirement. All rights reserved.
@@ -288,6 +340,7 @@ This project is part of a capstone requirement. All rights reserved.
 
 - Arduino community for servo control libraries
 - OpenCV for computer vision tools
+- TensorFlow for machine learning framework
 - Capstone advisors for guidance
 
 ---
@@ -298,7 +351,7 @@ This project is part of a capstone requirement. All rights reserved.
 
 **Developer:** User
 
-**Last Updated:** March 30, 2025
+**Last Updated:** April 1, 2025
 
 ---
 
@@ -309,6 +362,7 @@ This project is part of a capstone requirement. All rights reserved.
 All components tested and working:
 - Camera Preview: Excellent
 - Object Detection: Excellent
+- Waste Classification: Excellent
 - Sequence Playback: Excellent
 - Serial Communication: Excellent
 - UI Responsiveness: Excellent
