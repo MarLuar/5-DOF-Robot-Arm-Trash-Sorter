@@ -2021,6 +2021,9 @@ class UnifiedControlSystem:
             if not ret:
                 return
 
+            # Apply blur to reduce camera noise
+            frame = cv2.GaussianBlur(frame, (5, 5), 0)
+
             # Use cached canvas size (updated periodically from main thread)
             canvas_width = self.canvas_width
             canvas_height = self.canvas_height
@@ -3913,6 +3916,9 @@ class UnifiedControlSystem:
         """Detect objects in frame and log positions - only within grid area"""
         if self.empty_grid is None:
             return []
+
+        # Apply blur to reduce camera noise
+        frame = cv2.GaussianBlur(frame, (5, 5), 0)
 
         # Background subtraction
         diff = cv2.absdiff(self.empty_grid, frame)
