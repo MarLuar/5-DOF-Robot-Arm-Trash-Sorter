@@ -181,7 +181,7 @@ class UnifiedControlSystem:
         self.last_command_time = 0
 
         # Auto-offset ratio setting (compensates for trash between grids)
-        self.offset_ratio_var = tk.DoubleVar(value=1.0)  # For every 1° error, adjust 1° (normal sensitivity)
+        self.offset_ratio_var = tk.DoubleVar(value=2.0)  # For every 2° error, adjust 1° (medium sensitivity)
         self.auto_offset_suggestions = []  # List of (offset, confidence, reason) tuples
         self.last_offset_analysis_time = 0
         self.offset_analysis_interval = 0.5  # Analyze every 0.5 seconds (2 Hz) for fast response
@@ -407,7 +407,7 @@ class UnifiedControlSystem:
         ttk.Button(ratio_control_frame, text="-0.1", width=5,
                   command=lambda: self.adjust_offset_ratio(-0.1)).pack(side=tk.LEFT, padx=2)
 
-        self.offset_ratio_var = tk.DoubleVar(value=1.0)
+        self.offset_ratio_var = tk.DoubleVar(value=2.0)
         self.offset_ratio_entry = ttk.Entry(ratio_control_frame, textvariable=self.offset_ratio_var,
                                       width=8, justify='center')
         self.offset_ratio_entry.pack(side=tk.LEFT, padx=5)
@@ -418,7 +418,7 @@ class UnifiedControlSystem:
         ttk.Button(ratio_control_frame, text="+0.5", width=5,
                   command=lambda: self.adjust_offset_ratio(0.5)).pack(side=tk.LEFT, padx=2)
 
-        self.offset_ratio_status = ttk.Label(offset_ratio_frame, text="Ratio: 1:1.0 (Normal sensitivity)",
+        self.offset_ratio_status = ttk.Label(offset_ratio_frame, text="Ratio: 1:2.0 (Medium sensitivity)",
                                              foreground='blue', font=('Helvetica', 8))
         self.offset_ratio_status.pack(pady=3)
 
@@ -597,7 +597,7 @@ class UnifiedControlSystem:
         ttk.Button(ratio_calib_control, text="+0.5", width=4,
                   command=lambda: self.adjust_offset_ratio(0.5)).pack(side=tk.LEFT, padx=1)
 
-        self.calib_offset_ratio_status = ttk.Label(offset_ratio_calib_frame, text="Ratio: 1:1.0 (Normal sensitivity)",
+        self.calib_offset_ratio_status = ttk.Label(offset_ratio_calib_frame, text="Ratio: 1:2.0 (Medium sensitivity)",
                                              foreground='blue', font=('Helvetica', 7))
         self.calib_offset_ratio_status.pack(pady=2)
 
