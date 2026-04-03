@@ -3231,7 +3231,6 @@ class UnifiedControlSystem:
 
         except Exception as e:
             self._safe_after(0, lambda: self.log(f"Pickup error: {e}"))
-            self._safe_after(0, lambda: 
         finally:
             # Clean up thread reference
             if hasattr(self, '_current_pickup_thread'):
