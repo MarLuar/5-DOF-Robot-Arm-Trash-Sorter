@@ -496,10 +496,6 @@ class UnifiedControlSystem:
                        command=self.toggle_waste_classification)
         self.waste_classify_chk.pack(side=tk.LEFT, padx=10)
 
-        # Pickup button (initially disabled)
-        self.pickup_btn = ttk.Button(btn_frame, text="PICKUP OBJECT", command=self.pickup_detected_object, state='disabled')
-        self.pickup_btn.pack(side=tk.LEFT, padx=10)
-
         # Auto Pickup toggle
         self.auto_pickup_var = tk.BooleanVar(value=False)
         self.auto_pickup_chk = ttk.Checkbutton(btn_frame, text="Auto Pickup",
