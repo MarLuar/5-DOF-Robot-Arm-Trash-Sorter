@@ -96,14 +96,22 @@ class WasteDetectionGUI:
         cam_frame.pack(fill=tk.X, pady=5)
 
         ttk.Label(cam_frame, text="Camera Index:").pack(anchor='w')
-        self.camera_index_var = tk.StringVar(value=str(CAMERA_INDEX))
+        self.camera_index_var = tk.StringVar(value="0")
         cam_control = ttk.Frame(cam_frame)
         cam_control.pack(fill=tk.X, pady=3)
 
-        ttk.Entry(cam_control, textvariable=self.camera_index_var, width=8, justify='center').pack(side=tk.LEFT, padx=2)
-        ttk.Button(cam_control, text="Restart", command=self.restart_camera).pack(side=tk.LEFT, padx=2)
+        self.camera_combo = ttk.Combobox(cam_control, textvariable=self.camera_index_var, width=8, justify='center')
+        self.camera_combo.pack(side=tk.LEFT, padx=2)
+        self.camera_combo['values'] = [str(i) for i in range(8)]
 
+        ttk.Button(cam_control, text="Find", command=self.find_cameras).pack(side=tk.LEFT, padx=2)
+        ttk.Button(cam_control, text="Test", command=self.test_camera).pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(cam_frame, text="Start Camera", command=self.start_camera).pack(fill=tk.X, pady=3)
         ttk.Button(cam_frame, text="Capture Empty Grid", command=self.capture_empty_grid).pack(fill=tk.X, pady=3)
+
+        self.camera_status_label = ttk.Label(cam_frame, text="Status: Not started", foreground='gray', font=('Helvetica', 8))
+        self.camera_status_label.pack(pady=2)
 
         # Detection settings
         detect_frame = ttk.LabelFrame(right_frame, text="Detection Settings", padding="8")
@@ -182,6 +190,106 @@ class WasteDetectionGUI:
                 messagebox.showerror("Error", "Failed to capture frame")
         else:
             messagebox.showerror("Error", "Camera not available")
+
+    def find_cameras(self):
+        """Find all available camera devices"""
+        self.log("Scanning for cameras...")
+        available_cameras = []
+        camera_details = []
+
+        for i in range(8):
+            try:
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        fps_str = f"{fps:.1f}fps" if fps > 0 else "unknown fps"
+                        available_cameras.append(i)
+                        camera_details.append(f"  /dev/video{i}: {width}x{height} @ {fps_str}")
+                        self.log(f"Camera found: /dev/video{i} - {width}x{height} @ {fps_str}")
+                    cap.release()
+                else:
+                    cap.release()
+            except Exception as e:
+                self.log(f"Error checking /dev/video{i}: {e}")
+
+        if available_cameras:
+            self.camera_status_label.config(
+                text=f"Found: {len(available_cameras)} camera(s)",
+                foreground='green'
+            )
+
+            # Auto-select first available camera
+            self.camera_combo.set(str(available_cameras[0]))
+
+            # Show popup with camera list
+            camera_list = "\n".join(camera_details)
+            messagebox.showinfo(
+                "Cameras Found",
+                f"Found {len(available_cameras)} camera(s):\n\n"
+                f"{camera_list}\n\n"
+                f"Selected: /dev/video{self.camera_combo.get()}"
+            )
+        else:
+            self.camera_status_label.config(
+                text="No cameras found",
+                foreground='red'
+            )
+            messagebox.showwarning(
+                "No Cameras Found",
+                "No camera devices were detected.\n\n"
+                "Please check:\n"
+                "1. Camera is properly connected\n"
+                "2. Try a different USB port\n"
+                "3. Check dmesg for device info"
+            )
+
+        self.log(f"Scan complete: {len(available_cameras)} camera(s) found")
+
+    def test_camera(self):
+        """Test the selected camera index"""
+        try:
+            index = int(self.camera_index_var.get())
+            self.log(f"Testing camera at index {index}...")
+
+            cap = cv2.VideoCapture(index)
+
+            if not cap.isOpened():
+                self.log(f"Camera {index} could not be opened")
+                self.camera_status_label.config(text=f"Camera {index}: Failed", foreground='red')
+                messagebox.showerror("Error", f"Cannot open camera {index}")
+                return
+
+            ret, frame = cap.read()
+            if ret:
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                fps_str = f"{fps:.1f}fps" if fps > 0 else "unknown fps"
+
+                self.log(f"Camera {index} OK: {width}x{height} @ {fps_str}")
+                self.camera_status_label.config(
+                    text=f"Camera {index}: {width}x{height} @ {fps_str}",
+                    foreground='green'
+                )
+                messagebox.showinfo(
+                    "Camera Test OK",
+                    f"Camera {index} is working:\n\n"
+                    f"Resolution: {width}x{height}\n"
+                    f"FPS: {fps_str}"
+                )
+            else:
+                self.log(f"Camera {index} opened but no frame")
+                self.camera_status_label.config(text=f"Camera {index}: No frame", foreground='orange')
+                messagebox.showwarning("Warning", f"Camera {index} opened but could not read frame")
+
+            cap.release()
+        except Exception as e:
+            self.log(f"Camera test error: {e}")
+            messagebox.showerror("Error", f"Camera test failed:\n{e}")
 
     def start_camera(self):
         """Start camera preview"""
