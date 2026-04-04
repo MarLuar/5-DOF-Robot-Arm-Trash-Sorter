@@ -12,6 +12,8 @@ from PIL import Image, ImageTk
 import threading
 import time
 import os
+import serial
+import serial.tools.list_ports
 from datetime import datetime
 
 # Import waste classifier
@@ -22,13 +24,15 @@ from waste_classifier import WasteClassifier
 # Configuration
 BG_FILE = '/home/koogs/empty_grid_reference.jpg'
 CAMERA_INDEX = 0  # ZStar camera index
+ARDUINO_PORT = '/dev/ttyUSB0'  # Default Arduino serial port
+BAUD_RATE = 115200
 
 
 class WasteDetectionGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Waste Detection & Classification System")
-        self.root.geometry("1200x800")
+        self.root.geometry("1400x900")
 
         # Camera
         self.cap = None
@@ -38,6 +42,12 @@ class WasteDetectionGUI:
         # Classifier
         self.classifier = None
         self.classifier_ready = False
+
+        # Arduino serial connection
+        self.arduino = None
+        self.bio_capacity = 0
+        self.nonbio_capacity = 0
+        self.capacity_ready = False
 
         # Detection settings
         self.threshold_var = tk.IntVar(value=35)
@@ -56,6 +66,12 @@ class WasteDetectionGUI:
 
         # Load classifier
         self.load_classifier()
+
+        # Connect to Arduino
+        self.connect_arduino()
+
+        # Start capacity monitoring
+        self.update_capacity_display()
 
         # Start camera
         self.start_camera()
@@ -90,6 +106,30 @@ class WasteDetectionGUI:
         # Right: Control panel
         right_frame = ttk.Frame(main_frame)
         right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
+
+        # Trash Capacity Bars (at the top of right panel)
+        capacity_frame = ttk.LabelFrame(right_frame, text="Trash Bin Capacity", padding="10")
+        capacity_frame.pack(fill=tk.X, pady=5)
+
+        # Create canvas for capacity bars
+        self.capacity_canvas = tk.Canvas(capacity_frame, width=280, height=180, bg='white', highlightthickness=1, highlightbackground='gray')
+        self.capacity_canvas.pack(pady=5)
+
+        # Arduino connection
+        arduino_frame = ttk.Frame(capacity_frame)
+        arduino_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(arduino_frame, text="Serial Port:").pack(side=tk.LEFT, padx=2)
+        self.port_var = tk.StringVar(value=ARDUINO_PORT)
+        self.port_combo = ttk.Combobox(arduino_frame, textvariable=self.port_var, width=12)
+        self.port_combo.pack(side=tk.LEFT, padx=2)
+        self.port_combo['values'] = self.get_serial_ports()
+
+        self.connect_btn = ttk.Button(arduino_frame, text="Connect", command=self.connect_arduino)
+        self.connect_btn.pack(side=tk.LEFT, padx=2)
+
+        self.arduino_status = ttk.Label(capacity_frame, text="Arduino: Not Connected", foreground='gray', font=('Helvetica', 8))
+        self.arduino_status.pack(pady=2)
 
         # Camera control
         cam_frame = ttk.LabelFrame(right_frame, text="Camera Control", padding="8")
@@ -176,6 +216,153 @@ class WasteDetectionGUI:
         else:
             self.empty_grid = None
             self.log("No empty grid reference found. Click 'Capture Empty Grid' first.")
+
+    def get_serial_ports(self):
+        """Get list of available serial ports"""
+        ports = serial.tools.list_ports.comports()
+        return [port.device for port in ports]
+
+    def connect_arduino(self):
+        """Connect to Arduino via serial"""
+        try:
+            if self.arduino and self.arduino.is_open:
+                self.arduino.close()
+
+            port = self.port_var.get()
+            self.arduino = serial.Serial(port, BAUD_RATE, timeout=1)
+            time.sleep(2)  # Wait for Arduino to reset
+
+            self.capacity_ready = True
+            self.arduino_status.config(text=f"Arduino: Connected ({port})", foreground='green')
+            self.log(f"Arduino connected on {port}")
+
+            # Start monitoring capacity
+            self.update_capacity_display()
+
+        except Exception as e:
+            self.log(f"Arduino connection failed: {e}")
+            self.capacity_ready = False
+            self.arduino_status.config(text=f"Arduino: Connection Failed", foreground='red')
+            messagebox.showerror("Error", f"Could not connect to Arduino:\n{e}")
+
+    def update_capacity_display(self):
+        """Update capacity bars display"""
+        if not self.capacity_ready or not self.arduino:
+            # Draw empty bars
+            self.draw_capacity_bar("BIO", 0, "N/A")
+            self.draw_capacity_bar("NON-BIO", 0, "N/A")
+            self.root.after(2000, self.update_capacity_display)
+            return
+
+        try:
+            # Request capacity data from Arduino
+            self.arduino.write(b'CAPACITY\n')
+            time.sleep(0.1)
+
+            if self.arduino.in_waiting > 0:
+                line = self.arduino.readline().decode('utf-8').strip()
+
+                if line.startswith('CAP:'):
+                    # Parse: CAP:BIO:XX:NONBIO:XX
+                    parts = line.split(':')
+                    if len(parts) >= 5:
+                        self.bio_capacity = int(parts[2])
+                        self.nonbio_capacity = int(parts[4])
+
+                        self.draw_capacity_bar("BIO", self.bio_capacity, f"{self.bio_capacity}%")
+                        self.draw_capacity_bar("NON-BIO", self.nonbio_capacity, f"{self.nonbio_capacity}%")
+
+        except Exception as e:
+            self.log(f"Error reading capacity: {e}")
+
+        # Update every 2 seconds
+        self.root.after(2000, self.update_capacity_display)
+
+    def draw_capacity_bar(self, label, percentage, text):
+        """Draw a vertical capacity bar with green-to-red gradient"""
+        canvas = self.capacity_canvas
+
+        # Clear canvas
+        canvas.delete("all")
+
+        # Bar dimensions
+        bar_width = 60
+        bar_height = 120
+        spacing = 20
+
+        # Calculate positions for two bars
+        if label == "BIO":
+            x = 50
+        else:
+            x = 150
+
+        y_start = 30
+        y_end = y_start + bar_height
+
+        # Draw bar background (empty)
+        canvas.create_rectangle(
+            x, y_start, x + bar_width, y_end,
+            fill='#f0f0f0', outline='gray', width=2
+        )
+
+        # Calculate fill height
+        fill_height = (percentage / 100.0) * bar_height
+        fill_y = y_end - fill_height
+
+        # Calculate color (green to red gradient)
+        # Green at bottom (0%), Red at top (100%)
+        if percentage <= 50:
+            # Green to Yellow
+            ratio = percentage / 50.0
+            r = int(0 + (255 * ratio))
+            g = 255
+            b = 0
+        else:
+            # Yellow to Red
+            ratio = (percentage - 50) / 50.0
+            r = 255
+            g = int(255 * (1 - ratio))
+            b = 0
+
+        color = f'#{r:02x}{g:02x}{b:02x}'
+
+        # Draw filled portion (from bottom up)
+        if percentage > 0:
+            canvas.create_rectangle(
+                x, fill_y, x + bar_width, y_end,
+                fill=color, outline=''
+            )
+
+        # Draw border
+        canvas.create_rectangle(
+            x, y_start, x + bar_width, y_end,
+            fill='', outline='black', width=2
+        )
+
+        # Draw label
+        canvas.create_text(
+            x + bar_width // 2, y_start - 15,
+            text=label, font=('Helvetica', 10, 'bold')
+        )
+
+        # Draw percentage text
+        canvas.create_text(
+            x + bar_width // 2, y_end + 15,
+            text=text, font=('Helvetica', 9, 'bold')
+        )
+
+        # Draw tick marks
+        for i in range(0, 101, 25):
+            tick_y = y_end - (i / 100.0) * bar_height
+            canvas.create_line(
+                x - 5, tick_y, x, tick_y,
+                fill='black', width=1
+            )
+            canvas.create_text(
+                x - 10, tick_y,
+                text=f"{i}%", font=('Helvetica', 7),
+                anchor='e'
+            )
 
     def capture_empty_grid(self):
         """Capture current frame as empty grid reference"""
@@ -497,6 +684,8 @@ class WasteDetectionGUI:
         self.is_running = False
         if self.cap:
             self.cap.release()
+        if self.arduino and self.arduino.is_open:
+            self.arduino.close()
         self.root.destroy()
 
 

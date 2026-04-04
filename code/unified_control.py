@@ -23,7 +23,7 @@ import os
 from datetime import datetime
 
 # Configuration
-BAUD_RATE = 115200
+BAUD_RATE = 9600
 DEFAULT_SPEED = 5  # Default servo speed (ms/deg)
 MIN_ANGLE = 0
 MAX_ANGLE = 180
@@ -101,7 +101,7 @@ class UnifiedControlSystem:
         # Serial connection
         self.serial_conn = None
         self.is_connected = False
-        
+
         # Camera
         self.cap = None
         self.is_running = False
@@ -187,6 +187,11 @@ class UnifiedControlSystem:
         self.offset_analysis_interval = 0.5  # Analyze every 0.5 seconds (2 Hz) for fast response
         self.auto_offset_enabled_var = tk.BooleanVar(value=True)  # Enable auto-analysis by default
         self._last_applied_offset = 0.0  # Track last applied offset for display
+
+        # Capacity monitoring
+        self.auto_refresh_var = tk.BooleanVar(value=True)  # Auto-refresh capacity every 2s
+        self.bin_height_var = tk.DoubleVar(value=20.0)
+        self.min_distance_var = tk.DoubleVar(value=2.0)
 
         # Load saved camera setting BEFORE UI setup (calibration tab needs it)
         self.load_camera_setting()  # Auto-load saved camera setting
@@ -697,6 +702,34 @@ class UnifiedControlSystem:
         ttk.Label(step_values_frame, text="Values include auto-offset if enabled",
                  font=('Helvetica', 6), foreground='gray').pack(anchor='w', pady=(3,0))
 
+        # Trash Bin Capacity Display
+        capacity_frame = ttk.LabelFrame(self.right_panel, text="Trash Bin Capacity", padding="5")
+        capacity_frame.pack(fill=tk.X, pady=10)
+
+        self.bio_capacity_label = ttk.Label(capacity_frame, text="🟢 BIO: --%",
+                                            font=('Helvetica', 10, 'bold'), foreground='green')
+        self.bio_capacity_label.pack(anchor='w', pady=3)
+
+        self.nonbio_capacity_label = ttk.Label(capacity_frame, text="🔴 NON-BIO: --%",
+                                               font=('Helvetica', 10, 'bold'), foreground='red')
+        self.nonbio_capacity_label.pack(anchor='w', pady=3)
+
+        self.capacity_status_label = ttk.Label(capacity_frame, text="Status: Waiting...",
+                                               font=('Helvetica', 7), foreground='gray')
+        self.capacity_status_label.pack(anchor='w', pady=2)
+
+        # Capacity settings
+        capacity_settings_frame = ttk.LabelFrame(capacity_frame, text="Settings", padding="3")
+        capacity_settings_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(capacity_settings_frame, text="Bin Height (cm):", font=('Helvetica', 7)).pack(anchor='w')
+        self.bin_height_var = tk.DoubleVar(value=30.0)
+        ttk.Entry(capacity_settings_frame, textvariable=self.bin_height_var, width=8, justify='center').pack(fill=tk.X, pady=2)
+
+        ttk.Label(capacity_settings_frame, text="Min Distance (cm):", font=('Helvetica', 7)).pack(anchor='w', pady=(3,0))
+        self.min_distance_var = tk.DoubleVar(value=2.0)
+        ttk.Entry(capacity_settings_frame, textvariable=self.min_distance_var, width=8, justify='center').pack(fill=tk.X, pady=2)
+
         # Apply initial settings
         self.root.after(1000, self.init_camera_settings)
 
@@ -824,6 +857,72 @@ class UnifiedControlSystem:
         self.base_adjust_status.pack(anchor='w', pady=3)
 
         ttk.Label(base_adj_frame, text="⚠️ This modifies the sequences file", font=('Helvetica', 7), foreground='orange').pack(anchor='w')
+
+    def start_capacity_monitoring(self):
+        """Start automatic capacity monitoring"""
+        if self.auto_refresh_var.get():
+            self.update_capacity_display()
+
+    def toggle_auto_refresh(self):
+        """Toggle auto-refresh"""
+        if self.auto_refresh_var.get():
+            self.start_capacity_monitoring()
+        else:
+            pass  # Will stop on next update cycle
+
+    def read_capacity_manual(self):
+        """Manually read capacity from Arduino"""
+        if not self.is_connected or not self.serial_conn:
+            self.capacity_status_label.config(text="Status: Arduino not connected", foreground='red')
+            return
+        self.update_capacity_display()
+
+    def update_capacity_display(self):
+        """Update capacity percentage display"""
+        if not self.is_connected or not self.serial_conn:
+            # Show waiting status
+            self.bio_capacity_label.config(text="🟢 BIO: --%", foreground='gray')
+            self.nonbio_capacity_label.config(text="🔴 NON-BIO: --%", foreground='gray')
+            self.capacity_status_label.config(text="Status: Waiting for Arduino connection", foreground='gray')
+            if self.auto_refresh_var.get():
+                self.root.after(2000, self.update_capacity_display)
+            return
+
+        try:
+            # Request capacity data from Arduino using shared serial connection
+            with self.serial_lock:
+                # Clear any pending data
+                while self.serial_conn.in_waiting > 0:
+                    self.serial_conn.readline()
+
+                self.serial_conn.write(b'CAPACITY\n')
+                time.sleep(0.5)
+
+                if self.serial_conn.in_waiting > 0:
+                    line = self.serial_conn.readline().decode('utf-8').strip()
+
+                    if line.startswith('CAP:'):
+                        # Parse: CAP:BIO:XX:NONBIO:XX
+                        parts = line.split(':')
+                        if len(parts) >= 5:
+                            bio = int(parts[2])
+                            nonbio = int(parts[4])
+
+                            # Update labels
+                            self.bio_capacity_label.config(text=f"🟢 BIO: {bio}%", foreground='green')
+                            self.nonbio_capacity_label.config(text=f"🔴 NON-BIO: {nonbio}%", foreground='red')
+                            self.capacity_status_label.config(text=f"Status: Updated", foreground='blue')
+                    else:
+                        self.capacity_status_label.config(text=f"Status: Invalid response", foreground='orange')
+                else:
+                    self.capacity_status_label.config(text="Status: No response from Arduino", foreground='orange')
+
+        except Exception as e:
+            self.capacity_status_label.config(text=f"Status: Error - {str(e)[:20]}", foreground='red')
+
+        # Update every 2 seconds if auto-refresh enabled
+        if self.auto_refresh_var.get():
+            self.root.after(2000, self.update_capacity_display)
 
     def update_detection_display(self, cell=None):
         """Update the static detection status display"""
@@ -1282,6 +1381,9 @@ class UnifiedControlSystem:
         self.log("Moving to rest position (prevents struggling)...")
         self.go_to_rest()
 
+        # Start capacity monitoring when connected
+        self.start_capacity_monitoring()
+
         # Start monitoring for communication errors
         self.root.after(5000, self._monitor_communication)
 
@@ -1324,6 +1426,11 @@ class UnifiedControlSystem:
         self.connect_btn.config(text="Connect")
         self.status_label.config(text="Status: Disconnected", foreground='red')
         self.log("Disconnected")
+
+        # Update capacity display to show disconnected
+        self.bio_capacity_label.config(text="🟢 BIO: --%", foreground='gray')
+        self.nonbio_capacity_label.config(text="🔴 NON-BIO: --%", foreground='gray')
+        self.capacity_status_label.config(text="Status: Arduino not connected", foreground='gray')
 
         # Start monitoring for reconnection
         self.root.after(1000, self._monitor_reconnection)

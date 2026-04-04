@@ -10,18 +10,33 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 // Speed control (milliseconds per degree)
 int SERVO_SPEED = 15;  // Default: 15ms/deg (lower = faster)
 
+// Ultrasonic sensor pins
+#define BIO_TRIG 4
+#define BIO_ECHO 5
+#define NONBIO_TRIG 2
+#define NONBIO_ECHO 3
+
+// Maximum distance for ultrasonic sensors (cm)
+#define MAX_DISTANCE 400
+
 // Store current angles
 int currentAngles[5] = {150, 0, 70, 70, 140};  // Default rest position
 const char* jointNames[] = {"Base", "Shoulder", "Elbow", "Wrist", "Gripper"};
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   Serial.println("================================================");
   Serial.println("   5-DOF Robotic Arm Controller");
   Serial.println("   Format: servo angle (e.g., '0 90')");
   Serial.println("   Speed: 99 speed (e.g., '99 15') - 5 to 100");
   Serial.println("   Current Speed: " + String(SERVO_SPEED) + "ms/deg");
   Serial.println("================================================");
+
+  // Initialize ultrasonic sensor pins
+  pinMode(BIO_TRIG, OUTPUT);
+  pinMode(BIO_ECHO, INPUT);
+  pinMode(NONBIO_TRIG, OUTPUT);
+  pinMode(NONBIO_ECHO, INPUT);
 
   pwm.begin();
   pwm.setOscillatorFrequency(27000000);
@@ -41,6 +56,12 @@ void loop() {
     line.trim();
 
     if (line.length() == 0) return;
+
+    // Check for capacity request command
+    if (line == "CAPACITY") {
+      sendCapacityData();
+      return;
+    }
 
     // Check for multi-move command: "M a1 a2 a3 a4 a5"
     if (line.startsWith("M ")) {
@@ -88,6 +109,67 @@ void loop() {
       displayPositions();
     }
   }
+}
+
+// Send capacity data to serial
+void sendCapacityData() {
+  float bioDistance = readUltrasonic(BIO_TRIG, BIO_ECHO);
+  delay(50);  // Short delay to prevent sound waves overlapping
+  float nonBioDistance = readUltrasonic(NONBIO_TRIG, NONBIO_ECHO);
+
+  // Calculate capacity percentage
+  int bioCapacity = calculateCapacity(bioDistance);
+  int nonBioCapacity = calculateCapacity(nonBioDistance);
+
+  // Format: CAP:BIO:XX:NONBIO:XX
+  Serial.print("CAP:BIO:");
+  Serial.print(bioCapacity);
+  Serial.print(":NONBIO:");
+  Serial.println(nonBioCapacity);
+}
+
+// Calculate capacity percentage from distance reading
+int calculateCapacity(float distance) {
+  if (distance <= 0 || distance >= MAX_DISTANCE) {
+    return -1;  // Invalid reading
+  }
+
+  // Assuming bin height is approximately 30cm
+  // When distance = 30cm, bin is empty (0%)
+  // When distance = 2cm, bin is full (100%)
+  float binHeight = 30.0;  // cm
+  float emptyDistance = binHeight;
+  float fullDistance = 2.0;  // sensor minimum range
+
+  // Calculate percentage (inverted: closer = fuller)
+  float capacity = ((emptyDistance - distance) / (emptyDistance - fullDistance)) * 100;
+
+  // Constrain to 0-100
+  return constrain((int)capacity, 0, 100);
+}
+
+// Read ultrasonic sensor distance in cm
+float readUltrasonic(int trigPin, int echoPin) {
+  // Clear trig pin
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+
+  // Send 10us pulse
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  // Read echo pin (no timeout = 1 second default, matches working test code)
+  long duration = pulseIn(echoPin, HIGH);
+
+  if (duration == 0) {
+    return -1;  // No reading
+  }
+
+  // Calculate distance in cm (speed of sound = 0.0343 cm/us)
+  float distance = duration * 0.0343 / 2;
+
+  return distance;
 }
 
 // Handle multi-move command: "a1 a2 a3 a4 a5"
