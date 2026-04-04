@@ -150,6 +150,9 @@ class UnifiedControlSystem:
         self.pending_pickup_cell = None  # Cell waiting for confirmation
         self.object_confirmation_delay = 4.0  # Object must be present for 4 seconds before auto pickup
 
+        # Pickup execution state (prevents auto-offset during active pickup)
+        self._pickup_in_progress = False
+
         # Waste classification
         self.waste_classifier = None
         self.classifier_loaded = False
@@ -278,7 +281,7 @@ class UnifiedControlSystem:
 
             # Add warning for base servo
             if i == 0:  # Base
-                ttk.Label(frame, text="(110-120° risky)", foreground='orange', font=('Helvetica', 8)).pack(side=tk.LEFT, padx=3)
+                pass  # Warning removed
 
             btn_frame = ttk.Frame(frame)
             btn_frame.pack(side=tk.LEFT)
@@ -723,7 +726,7 @@ class UnifiedControlSystem:
         capacity_settings_frame.pack(fill=tk.X, pady=5)
 
         ttk.Label(capacity_settings_frame, text="Bin Height (cm):", font=('Helvetica', 7)).pack(anchor='w')
-        self.bin_height_var = tk.DoubleVar(value=30.0)
+        self.bin_height_var = tk.DoubleVar(value=20.0)
         ttk.Entry(capacity_settings_frame, textvariable=self.bin_height_var, width=8, justify='center').pack(fill=tk.X, pady=2)
 
         ttk.Label(capacity_settings_frame, text="Min Distance (cm):", font=('Helvetica', 7)).pack(anchor='w', pady=(3,0))
@@ -2645,7 +2648,8 @@ class UnifiedControlSystem:
                     self.log(f"[AUTO-OFFSET] New cell {cell} detected - cleared samples & reset hysteresis")
 
                 # Auto-offset suggestion analysis (when enabled)
-                if self.auto_offset_enabled_var.get():
+                # DISABLED during active pickup to prevent movement interference
+                if self.auto_offset_enabled_var.get() and not self._pickup_in_progress:
                     current_time = time.time()
                     if current_time - self.last_offset_analysis_time > self.offset_analysis_interval:
                         self.root.after(0, self.analyze_offset_suggestion)
@@ -3264,6 +3268,9 @@ class UnifiedControlSystem:
     def _execute_pickup_sequence(self, cell):
         """Execute pickup sequence in background thread with proper cleanup"""
         try:
+            # Set flag to prevent auto-offset analysis during pickup
+            self._pickup_in_progress = True
+
             self.log(f"[Timer]️ Starting pickup for {cell} at {time.time():.3f}")
 
             for i, step in enumerate(self.sequences[cell]):
@@ -3337,6 +3344,9 @@ class UnifiedControlSystem:
         except Exception as e:
             self._safe_after(0, lambda: self.log(f"Pickup error: {e}"))
         finally:
+            # Clear pickup in progress flag
+            self._pickup_in_progress = False
+
             # Clean up thread reference
             if hasattr(self, '_current_pickup_thread'):
                 self._current_pickup_thread = None
