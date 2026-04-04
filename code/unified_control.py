@@ -209,8 +209,8 @@ class UnifiedControlSystem:
         # Load sequences (after UI is ready)
         self.load_sequences()
 
-        # Start camera thread
-        self.start_camera_thread()
+        # Start camera thread (disabled - user will start manually via "Set Camera for Calibration")
+        # self.start_camera_thread()
 
         # Update canvas size cache periodically (from main thread)
         self.root.after(1000, self.update_canvas_size_cache)
@@ -476,8 +476,8 @@ class UnifiedControlSystem:
         self.calib_canvas.pack(fill=tk.BOTH, expand=True)
         self.calib_canvas.bind('<Button-1>', self.on_calib_click)
 
-        # Start calibration preview
-        self.start_calib_preview()
+        # Start calibration preview (disabled - user will start manually)
+        # self.start_calib_preview()
 
         # Buttons
         btn_frame = ttk.Frame(left_frame)
@@ -1006,10 +1006,12 @@ class UnifiedControlSystem:
 
         # Handle window close
         def on_close():
+            window = self.floating_log_window
             self.floating_log_window = None
             self.mirror_log_callback = None
             self.mirror_detection_callback = None
-            self.floating_log_window.destroy()
+            if window:
+                window.destroy()
 
         self.floating_log_window.protocol("WM_DELETE_WINDOW", on_close)
         self.log("Floating log window opened")
@@ -2449,188 +2451,182 @@ class UnifiedControlSystem:
     
     # Calibration Methods
     def start_calib_preview(self):
-        """Start calibration preview - uses configured camera index"""
+        """Start calibration preview - uses configured camera index with robust initialization"""
         # Get camera index from configuration
         try:
             camera_index = int(self.camera_index_var.get())
         except (ValueError, AttributeError):
             camera_index = 3  # Default fallback
 
-        self.log(f"Starting camera (device index: {camera_index})...")
+        self.log(f"=== Camera Initialization Debug ===")
+        self.log(f"Requested camera index: {camera_index}")
+        self.log(f"Available backends: V4L2={cv2.CAP_V4L2}, ANY={cv2.CAP_ANY}")
 
         # Close any existing camera
         if hasattr(self, 'cap') and self.cap:
+            self.log("Releasing existing camera...")
             self.cap.release()
+            time.sleep(0.5)  # Give camera time to release
 
-        # Try opening camera with multiple methods (index and direct path)
+        # Try opening camera with multiple methods
         camera_opened = False
 
         # Method 1: Try by index first
+        self.log("Method 1: Trying by index...")
         self.cap = cv2.VideoCapture(camera_index)
         if self.cap.isOpened():
-            camera_opened = True
-            self.log(f"Camera opened by index {camera_index}")
+            self.log(f"  Camera opened at index {camera_index}")
+            # Verify we can actually read frames
+            ret, test_frame = self.cap.read()
+            if ret and test_frame is not None:
+                camera_opened = True
+                self.log(f"  ✓ Successfully read test frame: {test_frame.shape}")
+            else:
+                self.log(f"  ✗ Camera opened but no frames (ret={ret}, frame={test_frame is not None})")
+                self.cap.release()
+                time.sleep(0.3)
+        else:
+            self.log(f"  ✗ Failed to open at index {camera_index}")
 
         # Method 2: Try direct device path (more reliable after reboot)
         if not camera_opened:
             device_path = f"/dev/video{camera_index}"
-            self.log(f"Index {camera_index} failed, trying direct path: {device_path}")
-            self.cap.release()
-            self.cap = cv2.VideoCapture(device_path)
+            self.log(f"Method 2: Trying direct path {device_path} with V4L2 backend...")
+            self.cap = cv2.VideoCapture(device_path, cv2.CAP_V4L2)
             if self.cap.isOpened():
-                camera_opened = True
-                self.log(f"Camera opened by direct path {device_path}")
+                self.log(f"  Camera opened at {device_path}")
+                ret, test_frame = self.cap.read()
+                if ret and test_frame is not None:
+                    camera_opened = True
+                    self.log(f"  ✓ Successfully read test frame: {test_frame.shape}")
+                else:
+                    self.log(f"  ✗ Camera opened but no frames (ret={ret}, frame={test_frame is not None})")
+                    self.cap.release()
+                    time.sleep(0.3)
+            else:
+                self.log(f"  ✗ Failed to open at {device_path}")
 
         # Method 3: Try adjacent indices (Z-Star may move on replug)
         if not camera_opened:
-            self.log(f"Device {camera_index} not available, trying {camera_index+1}...")
-            self.cap.release()
-            self.cap = cv2.VideoCapture(camera_index + 1)
-            if self.cap.isOpened():
-                camera_opened = True
-                self.log(f"Camera opened at index {camera_index+1}")
-
-        # Method 4: Try common Z-Star indices as fallback
-        if not camera_opened:
-            for fallback_idx in [0, 3, 4]:
-                if fallback_idx != camera_index and fallback_idx != camera_index + 1:
-                    self.log(f"Trying fallback device {fallback_idx}...")
-                    self.cap.release()
-                    self.cap = cv2.VideoCapture(fallback_idx)
+            self.log("Method 3: Trying adjacent indices...")
+            for try_idx in [camera_index + 1, camera_index - 1]:
+                if try_idx >= 0:
+                    self.log(f"  Trying index {try_idx}...")
+                    self.cap = cv2.VideoCapture(try_idx)
                     if self.cap.isOpened():
-                        camera_opened = True
-                        self.log(f"Fallback camera opened at {fallback_idx}")
-                        # Update UI to reflect the working camera
-                        self.camera_index_var.set(str(fallback_idx))
-                        break
+                        ret, test_frame = self.cap.read()
+                        if ret and test_frame is not None:
+                            camera_opened = True
+                            self.camera_index_var.set(str(try_idx))
+                            self.log(f"  ✓ Camera opened at index {try_idx}: {test_frame.shape}")
+                            break
+                        else:
+                            self.log(f"    ✗ Opened but no frames")
+                            self.cap.release()
+                    else:
+                        self.log(f"    ✗ Failed to open")
+                    time.sleep(0.3)
 
-        # Method 5: Scan all /dev/video* devices
+        # Method 4: Scan all /dev/video* devices
         if not camera_opened:
             import glob
-            for dev in glob.glob("/dev/video[0-9]"):
-                self.log(f"Scanning {dev}...")
-                self.cap.release()
-                self.cap = cv2.VideoCapture(dev)
+            devices = sorted(glob.glob("/dev/video[0-9]"))
+            self.log(f"Method 4: Scanning {len(devices)} devices: {devices}")
+            for dev in devices:
+                self.log(f"  Scanning {dev}...")
+                self.cap = cv2.VideoCapture(dev, cv2.CAP_V4L2)
                 if self.cap.isOpened():
-                    camera_opened = True
-                    dev_idx = dev.replace("/dev/video", "")
-                    self.log(f"Camera found at {dev}")
-                    self.camera_index_var.set(dev_idx)
-                    break
+                    ret, test_frame = self.cap.read()
+                    if ret and test_frame is not None:
+                        camera_opened = True
+                        dev_idx = dev.replace("/dev/video", "")
+                        self.log(f"  ✓ Camera found at {dev}: {test_frame.shape}")
+                        self.camera_index_var.set(dev_idx)
+                        break
+                    else:
+                        self.log(f"    ✗ Opened but no frames")
+                else:
+                    self.log(f"    ✗ Failed to open")
+                self.cap.release()
+                time.sleep(0.2)
 
         if camera_opened and self.cap.isOpened():
+            # Log camera properties
+            width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+            height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            fps = self.cap.get(cv2.CAP_PROP_FPS)
+            backend = self.cap.getBackendName() if hasattr(self.cap, 'getBackendName') else 'unknown'
+            self.log(f"Camera properties before config: {width}x{height} @ {fps}fps, backend={backend}")
+
+            # Set camera properties for better reliability
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            self.log(f"Camera opened successfully")
-            self.update_calib_preview()
+            self.cap.set(cv2.CAP_PROP_FPS, 30)
+
+            # Give camera time to initialize
+            self.log("Waiting for camera to initialize...")
+            time.sleep(0.5)
+
+            # Read and discard first few frames (often black/invalid)
+            self.log("Discarding initial 5 frames...")
+            for i in range(5):
+                ret, frame = self.cap.read()
+                if ret and frame is not None:
+                    # Check if frame is all black
+                    mean_val = frame.mean()
+                    self.log(f"  Frame {i+1}: {frame.shape}, mean brightness={mean_val:.1f}")
+                else:
+                    self.log(f"  Frame {i+1}: Failed to read")
+                time.sleep(0.05)
+
+            # Verify final frame
+            ret, final_frame = self.cap.read()
+            if ret and final_frame is not None:
+                mean_brightness = final_frame.mean()
+                self.log(f"✓ Camera ready. Final frame: {final_frame.shape}, brightness={mean_brightness:.1f}")
+                if mean_brightness < 10:
+                    self.log("⚠️  WARNING: Frame appears very dark/black. Check camera exposure settings.")
+            else:
+                self.log("✗ WARNING: Could not read final verification frame!")
+
+            self.log(f"=== Camera Initialization Complete ===")
+            self.camera_status_label.config(
+                text=f"Camera: /dev/video{self.camera_index_var.get()}",
+                foreground='green'
+            )
+
+            # Start camera thread for object detection and canvas updates
+            self.start_camera_thread()
+
+            self.update_calib_preview()  # Start UI state updates
         else:
-            self.log(f"ERROR: Camera not found at configured index {camera_index} or any fallback!")
+            self.log(f"✗✗✗ CAMERA INITIALIZATION FAILED ✗✗✗")
+            self.log(f"Requested index: {camera_index}")
+            import glob
+            devices = sorted(glob.glob("/dev/video[0-9]"))
+            self.log(f"Available devices: {devices}")
+            self.log(f"=== Camera Initialization Complete (FAILED) ===")
             messagebox.showerror(
                 "Camera Error",
                 f"Could not open camera!\n\n"
-                f"Tried: index {camera_index}, /dev/video{camera_index}, /dev/video{camera_index+1}, /dev/video0, /dev/video3, /dev/video4\n\n"
+                f"Tried: index {camera_index}, /dev/video{camera_index}, adjacent indices, all /dev/video* devices\n\n"
+                f"Available devices: {devices}\n\n"
                 f"Make sure:\n"
                 f"1. Camera is plugged in\n"
                 f"2. Try a different USB port\n"
                 f"3. Use 'Find' button to detect available cameras\n"
-                f"4. Check if another application is using the camera"
+                f"4. Check if another application is using the camera\n"
+                f"5. Check system log: dmesg | tail -20"
             )
     
     def update_calib_preview(self):
-        """Update calibration preview - scale to fit canvas and center"""
+        """Update calibration UI state only (called from main thread) - canvas updated by camera thread"""
         try:
             if not self.cap or not self.cap.isOpened():
                 self.calib_canvas.after(30, self.update_calib_preview)
                 return
 
-            ret, frame = self.cap.read()
-            if not ret:
-                self.calib_canvas.after(30, self.update_calib_preview)
-                return
-
-            # Get canvas size
-            canvas_width = self.calib_canvas.winfo_width()
-            canvas_height = self.calib_canvas.winfo_height()
-
-            if canvas_width < 2 or canvas_height < 2:
-                self.calib_canvas.after(30, self.update_calib_preview)
-                return
-
-            # Get frame dimensions
-            frame_height, frame_width = frame.shape[:2]
-
-            # Calculate scale to fit canvas (maintain aspect ratio)
-            scale_x = canvas_width / frame_width
-            scale_y = canvas_height / frame_height
-            scale = min(scale_x, scale_y)
-
-            # Calculate new dimensions
-            new_width = int(frame_width * scale)
-            new_height = int(frame_height * scale)
-
-            # Resize frame
-            display_frame = cv2.resize(frame, (new_width, new_height))
-
-            # Create black background
-            bg = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
-
-            # Center the image
-            x_offset = (canvas_width - new_width) // 2
-            y_offset = (canvas_height - new_height) // 2
-            bg[y_offset:y_offset+new_height, x_offset:x_offset+new_width] = display_frame
-
-            # Store scale and offset for marker drawing
-            self.calib_scale = scale
-            self.calib_x_offset = x_offset
-            self.calib_y_offset = y_offset
-
-            # Draw clicked corners (always visible) - scaled to display coordinates
-            corner_colors = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (0, 255, 255)]
-            corner_names = ['1:TL', '2:TR', '3:BL', '4:BR']
-            for i, (orig_x, orig_y) in enumerate(self.corners):
-                if i < 4:
-                    # Scale original click coordinates to display coordinates
-                    disp_x = int(orig_x * scale) + x_offset
-                    disp_y = int(orig_y * scale) + y_offset
-
-                    cv2.circle(bg, (disp_x, disp_y), 15, corner_colors[i], -1)
-                    cv2.circle(bg, (disp_x, disp_y), 20, corner_colors[i], 2)
-                    cv2.putText(bg, corner_names[i], (disp_x+20, disp_y-20),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, corner_colors[i], 2)
-
-            # If calibrated, draw grid overlay on every frame - scaled (THICK lines)
-            if self.is_calibrated and len(self.all_points) >= 25:
-                # Draw grid lines - scale all_points to display coordinates (THICK: 2px)
-                for row in range(5):
-                    idx1 = row * 5
-                    idx2 = idx1 + 4
-                    if idx2 < len(self.all_points):
-                        # Scale points to display coordinates
-                        pt1_x = int(self.all_points[idx1][0] * scale) + x_offset
-                        pt1_y = int(self.all_points[idx1][1] * scale) + y_offset
-                        pt2_x = int(self.all_points[idx2][0] * scale) + x_offset
-                        pt2_y = int(self.all_points[idx2][1] * scale) + y_offset
-                        cv2.line(bg, (pt1_x, pt1_y), (pt2_x, pt2_y), (0, 255, 0), 2)
-
-                for col in range(5):
-                    idx1 = col
-                    idx2 = col + 20
-                    if idx2 < len(self.all_points):
-                        # Scale points to display coordinates
-                        pt1_x = int(self.all_points[idx1][0] * scale) + x_offset
-                        pt1_y = int(self.all_points[idx1][1] * scale) + y_offset
-                        pt2_x = int(self.all_points[idx2][0] * scale) + x_offset
-                        pt2_y = int(self.all_points[idx2][1] * scale) + y_offset
-                        cv2.line(bg, (pt1_x, pt1_y), (pt2_x, pt2_y), (0, 255, 0), 2)
-
-                # Draw calculated corner points - scaled
-                for i in range(4):
-                    if i < len(self.all_points):
-                        disp_x = int(self.all_points[i][0] * scale) + x_offset
-                        disp_y = int(self.all_points[i][1] * scale) + y_offset
-                        cv2.circle(bg, (disp_x, disp_y), 10, corner_colors[i], -1)
-
-            # Object detection state is managed by camera thread only
+            # Object detection state is managed by camera thread
             # This function only reads shared state for UI updates (buttons, labels)
             has_detection = hasattr(self, 'last_detected_cell') and self.last_detected_cell is not None
 
@@ -2732,20 +2728,9 @@ class UnifiedControlSystem:
                 )
                 self.update_detection_display(None)
 
-            # Convert BGR to RGB
-            bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(bg)
-            photo = ImageTk.PhotoImage(image=img)
-
-            # DO NOT update canvas here - camera thread handles all canvas updates
-            # This function only handles UI state (buttons, labels)
-            # self.calib_canvas.delete("all")  # REMOVED - causes flickering!
-            # self.calib_canvas.create_image(0, 0, anchor='nw', image=photo)
-            # self.calib_canvas.image = photo
-
-            self.calib_canvas.after(500, self.update_calib_preview)  # 2 FPS for UI updates
+            self.calib_canvas.after(30, self.update_calib_preview)  # ~30 FPS for UI updates
         except Exception as e:
-            self.log(f"Preview error: {e}")
+            self.log(f"Preview UI update error: {e}")
             self.calib_canvas.after(1000, self.update_calib_preview)
     
     def on_calib_click(self, event):
@@ -3078,30 +3063,43 @@ class UnifiedControlSystem:
             else:
                 self.exposure_scale.config(state='normal')
 
+            # Get current camera device path
+            try:
+                cam_idx = int(self.camera_index_var.get())
+                device_path = f"/dev/video{cam_idx}"
+            except:
+                device_path = "/dev/video0"
+
             # Apply settings via v4l2-ctl
             import subprocess
 
             # Set exposure mode: 3=Auto, 1=Manual
             if mode == "auto":
-                subprocess.run(
-                    ['v4l2-ctl', '--device=/dev/video0',
+                result = subprocess.run(
+                    ['v4l2-ctl', f'--device={device_path}',
                      '-c', 'auto_exposure=3'],
                     capture_output=True, timeout=2
                 )
-                self.log("Camera exposure set to AUTO")
+                if result.returncode == 0:
+                    self.log(f"Camera exposure set to AUTO ({device_path})")
+                else:
+                    self.log(f"Warning: v4l2-ctl failed for auto exposure: {result.stderr.decode()}")
             else:
                 # First set to manual mode, then set exposure value
-                subprocess.run(
-                    ['v4l2-ctl', '--device=/dev/video0',
+                result = subprocess.run(
+                    ['v4l2-ctl', f'--device={device_path}',
                      '-c', 'auto_exposure=1',
                      '-c', f'exposure_time_absolute={exposure}'],
                     capture_output=True, timeout=2
                 )
-                self.log(f"Camera exposure set to MANUAL: {exposure}")
+                if result.returncode == 0:
+                    self.log(f"Camera exposure set to MANUAL: {exposure} ({device_path})")
+                else:
+                    self.log(f"Warning: v4l2-ctl failed for manual exposure: {result.stderr.decode()}")
 
             # Set gamma, saturation, sharpness (always applied)
-            subprocess.run(
-                ['v4l2-ctl', '--device=/dev/video0',
+            result = subprocess.run(
+                ['v4l2-ctl', f'--device={device_path}',
                  '-c', f'gamma={gamma}',
                  '-c', f'saturation={saturation}',
                  '-c', f'sharpness={sharpness}'],
