@@ -835,6 +835,24 @@ class UnifiedControlSystem:
 
         ttk.Button(right_frame, text="Play Sequence", command=self.test_sequence).pack(fill=tk.X, pady=10)
 
+        # BIO/NON-BIO Conversion
+        convert_frame = ttk.LabelFrame(right_frame, text="Convert Sequence", padding="8")
+        convert_frame.pack(fill=tk.X, pady=10)
+
+        ttk.Label(convert_frame, text="Convert selected cell's sequence:", font=('Helvetica', 8)).pack(anchor='w', pady=(0,5))
+        ttk.Label(convert_frame, text="Changes Step 7 & 8 base angle:", font=('Helvetica', 7), foreground='gray').pack(anchor='w')
+
+        convert_btn_frame = ttk.Frame(convert_frame)
+        convert_btn_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Button(convert_btn_frame, text="→ BIO (180°)", width=12,
+                  command=self.convert_to_bio, style='Accent.TButton').pack(side=tk.LEFT, padx=2, expand=True)
+        ttk.Button(convert_btn_frame, text="→ NON-BIO (0°)", width=12,
+                  command=self.convert_to_nonbio).pack(side=tk.LEFT, padx=2, expand=True)
+
+        self.convert_status_label = ttk.Label(convert_frame, text="Select a cell to convert", foreground='gray', font=('Helvetica', 7))
+        self.convert_status_label.pack(anchor='w', pady=3)
+
         # Global Base Adjustment
         base_adj_frame = ttk.LabelFrame(right_frame, text="Global Base Adjustment", padding="8")
         base_adj_frame.pack(fill=tk.X, pady=10)
@@ -1729,6 +1747,91 @@ class UnifiedControlSystem:
         except Exception as e:
             self.log(f"Base adjustment error: {e}")
             messagebox.showerror("Error", f"Failed to adjust base angles: {e}")
+
+    def convert_to_bio(self):
+        """Convert selected cell's sequence to BIO (set step 7 & 8 base to 180°)"""
+        self._convert_sequence(180, "BIO")
+
+    def convert_to_nonbio(self):
+        """Convert selected cell's sequence to NON-BIO (set step 7 & 8 base to 0°)"""
+        self._convert_sequence(0, "NON-BIO")
+
+    def _convert_sequence(self, base_angle, mode):
+        """Convert sequence steps 7 & 8 to specified base angle
+
+        Args:
+            base_angle: 180 for BIO, 0 for NON-BIO
+            mode: "BIO" or "NON-BIO"
+        """
+        # Get selected cell
+        selection = self.cell_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a cell to convert first!")
+            return
+
+        selected_text = self.cell_listbox.get(selection[0])
+        cell_name = selected_text.split()[0]  # Remove "[OK]" suffix if present
+
+        if cell_name not in self.sequences:
+            messagebox.showwarning("No Sequence", f"No sequence found for {cell_name}!")
+            return
+
+        # Confirm conversion
+        confirm = messagebox.askyesno(
+            "Confirm Conversion",
+            f"Convert {cell_name} to {mode}?\n\n"
+            f"This will set Step 7 & 8 base angle to {base_angle}°\n"
+            f"Other steps will remain unchanged."
+        )
+
+        if not confirm:
+            return
+
+        try:
+            sequence = self.sequences[cell_name]
+
+            # Check if sequence has at least 8 steps
+            if len(sequence) < 8:
+                messagebox.showwarning(
+                    "Insufficient Steps",
+                    f"Sequence for {cell_name} has only {len(sequence)} steps.\n"
+                    f"Need at least 8 steps to convert."
+                )
+                return
+
+            # Modify steps 7 and 8 (indices 6 and 7)
+            modified_steps = []
+            for step_idx in [6, 7]:  # Steps 7 and 8 (0-indexed)
+                if 'angles' in sequence[step_idx]:
+                    angles = sequence[step_idx]['angles']
+                    old_base = angles[0]
+                    angles[0] = base_angle  # Change base angle
+                    sequence[step_idx]['angles'] = angles
+                    modified_steps.append(step_idx + 1)
+                    self.log(f"  Step {step_idx + 1}: Base {old_base}° → {base_angle}°")
+
+            # Save sequences
+            with open(SEQUENCES_FILE, 'w') as f:
+                json.dump(self.sequences, f, indent=2)
+
+            # Update UI
+            self.convert_status_label.config(
+                text=f"✓ {cell_name} converted to {mode}",
+                foreground='green'
+            )
+            self.log(f"✓ Converted {cell_name} to {mode} (Steps {modified_steps[0]} & {modified_steps[1]} base = {base_angle}°)")
+            messagebox.showinfo(
+                "Conversion Complete",
+                f"Successfully converted {cell_name} to {mode}\n\n"
+                f"Steps {modified_steps[0]} & {modified_steps[1]} base angle set to {base_angle}°"
+            )
+
+            # Reload sequence in editor
+            self.on_cell_select(None)
+
+        except Exception as e:
+            self.log(f"Conversion error: {e}")
+            messagebox.showerror("Error", f"Failed to convert sequence: {e}")
 
     # Auto-Offset Ratio Methods (for grid alignment)
     def adjust_offset_ratio(self, amount):
