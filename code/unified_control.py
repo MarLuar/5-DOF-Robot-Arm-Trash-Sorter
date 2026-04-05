@@ -148,15 +148,25 @@ class UnifiedControlSystem:
         self.auto_pickup_thread = None
         self.auto_pickup_running = False
         self.pending_pickup_cell = None  # Cell waiting for confirmation
-        self.object_confirmation_delay = 4.0  # Object must be present for 4 seconds before auto pickup
+        self.object_confirmation_delay = 6.0  # Object must be present for 6 seconds before auto pickup (increased to allow 10 classification samples)
 
         # Pickup execution state (prevents auto-offset during active pickup)
         self._pickup_in_progress = False
+
+        # Classification lock (prevents overwriting during sequence execution)
+        self._locked_classification = None  # Locked classification for current pickup
+        self._pickup_sequence_started = False  # Flag to prevent classification updates during pickup
+        self._pickup_pending = False  # Flag to preserve classification when pickup is about to start
 
         # Waste classification
         self.waste_classifier = None
         self.classifier_loaded = False
         self.classification_results = {}  # cell -> (class_name, confidence)
+
+        # Webhook client for sending classification data to Laravel website
+        self.webhook_client = None
+        self.webhook_enabled = False
+        self.webhook_use_production = True  # Always production
 
         # Classification smoothing (prevents flickering)
         self.classification_history = []  # List of (class_name, confidence) tuples
@@ -2233,10 +2243,15 @@ class UnifiedControlSystem:
 
                         self.last_detected_cell = detected
                     else:
-                        # No objects detected - clear classification history
-                        self.classification_history = []
-                        self.classification_confirmed = None
-                        self.last_detected_cell = None
+                        # No objects detected - but DON'T clear if pickup is imminent
+                        if self._pickup_pending or self.pending_pickup_cell:
+                            # Keep classification for pending pickup
+                            self.last_detected_cell = None
+                        else:
+                            # Safe to clear - no pickup pending
+                            self.classification_history = []
+                            self.classification_confirmed = None
+                            self.last_detected_cell = None
 
                 has_detection = hasattr(self, 'last_detected_cell') and self.last_detected_cell is not None
                 if has_detection and time.time() - self.last_detection_time < self.detection_timeout:
@@ -2255,6 +2270,11 @@ class UnifiedControlSystem:
                         # Classify using original frame coordinates
                         class_name, confidence = self.classify_detected_object(frame, obj)
                         self.classification_results[obj.get('cell', '?')] = (class_name, confidence)
+
+                        # If classification returned 'Unknown' but pickup is pending, use confirmed classification
+                        if class_name == 'Unknown' and self._pickup_pending and self.classification_confirmed:
+                            class_name, confidence = self.classification_confirmed
+                            self.log(f"[DISPLAY] Using confirmed classification: {class_name} ({confidence:.0%})")
 
                         # Set color based on classification
                         if class_name == 'biodegradable':
@@ -2665,6 +2685,9 @@ class UnifiedControlSystem:
                         if self.pending_pickup_cell == cell:
                             elapsed = time.time() - self.object_first_detected_time
                             if elapsed >= self.object_confirmation_delay:
+                                # LOCK classification before pickup starts
+                                self._pickup_pending = True
+
                                 # Calculate current averaged offset for logging
                                 avg_offset = 0
                                 if hasattr(self, 'auto_offset_suggestions') and len(self.auto_offset_suggestions) > 0:
@@ -2720,7 +2743,16 @@ class UnifiedControlSystem:
                 
                 if self.auto_pickup_enabled and self.auto_pickup_running:
                     self.pending_pickup_cell = None
-                    self.object_first_detected_time = 0
+                    # Don't reset timer immediately - allow brief gaps (2s grace period)
+                    current_time = time.time()
+                    if not hasattr(self, '_last_detection_gap_time'):
+                        self._last_detection_gap_time = 0
+
+                    # Only reset timer if gap is longer than 2 seconds
+                    if current_time - self.last_detection_time > 2.0:
+                        self.object_first_detected_time = 0
+                        self._last_detection_gap_time = 0
+                    # Keep timer running if gap is short
                     # Keep offset samples - they're still valid for next detection
                 # Reset cell hysteresis after timeout expires
                 if self.cell_confirmed and time.time() - self.last_detection_time > self.detection_timeout:
@@ -2946,6 +2978,22 @@ class UnifiedControlSystem:
                     self.waste_classify_var.set(False)
                     messagebox.showerror("Error", f"Could not load waste classifier:\n{e}")
                     return
+
+            # Initialize webhook client if not already done (always production)
+            if self.webhook_client is None:
+                try:
+                    import sys
+                    sys.path.insert(0, '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/code')
+                    from classification_webhook import ClassificationWebhookClient
+                    self.webhook_client = ClassificationWebhookClient(
+                        use_production=True  # Always production
+                    )
+                    self.webhook_enabled = True
+                    self.log("✓ Webhook client initialized (Production)")
+                    self.log(f"  URL: {self.webhook_client.base_url}")
+                except Exception as e:
+                    self.log(f"⚠ Failed to initialize webhook client: {e}")
+                    self.log("  Classification will work, but data won't be sent to website")
             else:
                 self.log("Waste classification enabled")
         else:
@@ -2964,6 +3012,10 @@ class UnifiedControlSystem:
         Returns:
             tuple: (class_name, confidence) or ('Unknown', 0.0)
         """
+        # Skip classification updates during pickup sequence execution
+        if self._pickup_sequence_started:
+            return self._locked_classification if self._locked_classification else ('Unknown', 0.0)
+
         if not self.classifier_loaded or self.waste_classifier is None:
             return 'Unknown', 0.0
 
@@ -3006,6 +3058,208 @@ class UnifiedControlSystem:
         except Exception as e:
             self.log(f"Classification error: {e}")
             return 'Unknown', 0.0
+
+    def send_webhook_after_pickup(self, cell: str):
+        """Send classification and bin capacity data to Laravel after successful pickup
+
+        Args:
+            cell: Grid cell where object was detected (e.g., 'A1', 'A1_NON', 'B3')
+        """
+        if not self.webhook_enabled or self.webhook_client is None:
+            self.log("⚠ Webhook not enabled, skipping")
+            return
+
+        try:
+            # Strip _NON suffix to get base cell name
+            base_cell = cell.replace('_NON', '')
+
+            # Get the confirmed classification for this cell
+            class_name, confidence = self.classification_results.get(base_cell, ('unknown', 0.0))
+
+            # Fallback to locked classification if available
+            if (class_name == 'unknown' or confidence == 0.0) and self._locked_classification:
+                class_name, confidence = self._locked_classification
+                self.log(f"[WEBHOOK] Using locked classification: {class_name} ({confidence:.0%})")
+
+            if class_name == 'unknown' or confidence == 0.0:
+                self.log(f"⚠ No classification data for cell {base_cell}, skipping webhook")
+                self.log(f"   Available cells: {list(self.classification_results.keys())}")
+                return
+
+            # Send classification webhook
+            result = self.webhook_client.send_classification(
+                classification=class_name,
+                confidence=confidence,
+                model_name='waste_inference_v1'
+            )
+
+            if result['success']:
+                self.log(f"✓ Webhook sent: {class_name} ({confidence:.0%})")
+            else:
+                self.log(f"⚠ Webhook failed: {result['message']}")
+
+        except Exception as e:
+            self.log(f"⚠ Post-pickup webhook error: {e}")
+            import traceback
+            self.log(f"   Details: {traceback.format_exc()}")
+
+    def send_bin_capacity_after_drop(self, cell: str):
+        """Send bin capacity to Laravel after object is dropped (with delay for Arduino to update)
+
+        Args:
+            cell: Grid cell where object was detected (unused, kept for compatibility)
+        """
+        if not self.webhook_enabled or self.webhook_client is None:
+            self.log("⚠ Webhook not enabled, skipping bin capacity update")
+            return
+
+        try:
+            # Read current capacity from Arduino
+            if not self.is_connected or not self.serial_conn:
+                self.log("⚠ Arduino not connected, skipping bin capacity update")
+                return
+
+            self.log("📊 Reading bin capacity after drop...")
+
+            # Request capacity data from Arduino
+            with self.serial_lock:
+                # Clear any pending data
+                while self.serial_conn.in_waiting > 0:
+                    self.serial_conn.readline()
+
+                self.serial_conn.write(b'CAPACITY\n')
+                time.sleep(0.5)
+
+                if self.serial_conn.in_waiting > 0:
+                    line = self.serial_conn.readline().decode('utf-8').strip()
+
+                    if line.startswith('CAP:'):
+                        # Parse: CAP:BIO:XX:NONBIO:XX
+                        parts = line.split(':')
+                        if len(parts) >= 5:
+                            bio_fill = int(parts[2])
+                            nonbio_fill = int(parts[4])
+
+                            # Send both bin fill levels to Laravel
+                            self._send_bin_reading(bio_fill, nonbio_fill)
+
+                            self.log(f"📊 Bin capacity UPDATED: BIO={bio_fill}%, NON-BIO={nonbio_fill}%")
+                        else:
+                            self.log(f"⚠ Invalid capacity format: {line}")
+                    else:
+                        self.log(f"⚠ No capacity data from Arduino")
+                else:
+                    self.log(f"⚠ Arduino didn't respond to capacity request")
+
+        except Exception as e:
+            self.log(f"⚠ Bin capacity update error: {e}")
+            import traceback
+            self.log(f"   Details: {traceback.format_exc()}")
+
+    def send_bin_capacity_webhook(self, classification: str):
+        """Send current bin capacity to Laravel website
+
+        Args:
+            classification: 'biodegradable' or 'non-biodegradable' (which bin was used)
+        """
+        if not self.webhook_enabled or self.webhook_client is None:
+            return
+
+        try:
+            # Read current capacity from Arduino
+            if not self.is_connected or not self.serial_conn:
+                return
+
+            # Request capacity data from Arduino
+            with self.serial_lock:
+                # Clear any pending data
+                while self.serial_conn.in_waiting > 0:
+                    self.serial_conn.readline()
+
+                self.serial_conn.write(b'CAPACITY\n')
+                time.sleep(0.5)
+
+                if self.serial_conn.in_waiting > 0:
+                    line = self.serial_conn.readline().decode('utf-8').strip()
+
+                    if line.startswith('CAP:'):
+                        # Parse: CAP:BIO:XX:NONBIO:XX
+                        parts = line.split(':')
+                        if len(parts) >= 5:
+                            bio_fill = int(parts[2])
+                            nonbio_fill = int(parts[4])
+
+                            # Send both bin fill levels to Laravel
+                            self._send_bin_reading(bio_fill, nonbio_fill)
+
+                            self.log(f"📊 Capacity sent: BIO={bio_fill}%, NON-BIO={nonbio_fill}%")
+                        else:
+                            self.log(f"⚠ Invalid capacity format: {line}")
+                    else:
+                        self.log(f"⚠ No capacity data from Arduino")
+                else:
+                    self.log(f"⚠ Arduino didn't respond to capacity request")
+
+        except Exception as e:
+            self.log(f"⚠ Capacity webhook error: {e}")
+
+    def _send_bin_reading(self, bio_fill: float, nonbio_fill: float):
+        """Send bin readings to Laravel (both bio and nonbio together)
+
+        Args:
+            bio_fill: Biodegradable bin fill level (0-100)
+            nonbio_fill: Non-biodegradable bin fill level (0-100)
+        """
+        try:
+            # Always production
+            url = "https://smartrecyclebot-b86k.onrender.com/api/bin-reading-read"
+
+            # Send in background thread
+            thread = threading.Thread(
+                target=self._post_bin_reading,
+                args=(url, bio_fill, nonbio_fill),
+                daemon=True
+            )
+            thread.start()
+
+        except Exception as e:
+            self.log(f"⚠ Bin reading error: {e}")
+
+    def _post_bin_reading(self, url: str, bio_fill: float, nonbio_fill: float):
+        """POST bin readings to Laravel
+
+        Args:
+            url: API endpoint
+            bio_fill: Biodegradable bin fill level
+            nonbio_fill: Non-biodegradable bin fill level
+        """
+        import requests
+
+        headers = {
+            'Content-Type': 'application/json',
+            'X-API-Key': '9kX7mP2nQ8vL4sR6wT1yF3hJ5gB0dZ9c'
+        }
+
+        payload = {
+            'bio': float(bio_fill),
+            'nonbio': float(nonbio_fill)
+        }
+
+        try:
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=5.0
+            )
+
+            if response.status_code in [200, 201]:
+                pass  # Success (logged in parent function)
+            else:
+                self.log(f"⚠ Bin reading failed: HTTP {response.status_code}")
+
+        except Exception as e:
+            self.log(f"⚠ Bin reading POST error: {e}")
 
     def init_camera_settings(self):
         """Initialize camera settings on startup"""
@@ -3161,41 +3415,33 @@ class UnifiedControlSystem:
         execute_cell = cell
 
         if self.waste_classify_var.get() and self.classifier_loaded:
-            # Classify the detected object
-            if hasattr(self, 'last_detected_cell') and self.last_detected_cell:
-                obj = self.last_detected_cell
+            # LOCK the current confirmed classification to prevent overwriting during sequence
+            if hasattr(self, 'classification_confirmed') and self.classification_confirmed:
+                # Lock it so detection loop can't overwrite during sequence execution
+                self._locked_classification = self.classification_confirmed
+                self._pickup_sequence_started = True
 
-                # Grab current frame for classification
-                if self.cap and self.cap.isOpened():
-                    ret, frame = self.cap.read()
-                    if ret:
-                        class_name, confidence = self.classify_detected_object(frame, obj)
-                        self.log(f"[AUTO] Classification: {class_name} ({confidence:.0%})")
+                class_name, confidence = self._locked_classification
+                self.log(f"[AUTO] LOCKED classification: {class_name} ({confidence:.0%})")
 
-                        # Determine which sequence to use
-                        base_cell = cell.replace('_NON', '')  # Get base cell (e.g., A1 from A1_NON)
+                # Determine which sequence to use
+                base_cell = cell.replace('_NON', '')  # Get base cell (e.g., A1 from A1_NON)
 
-                        if class_name == 'non-biodegradable':
-                            # Use NON variant
-                            non_cell = f"{base_cell}_NON"
-                            if non_cell in self.sequences:
-                                execute_cell = non_cell
-                                self.log(f"[AUTO] NON-BIO detected -> using {execute_cell} sequence")
-                            else:
-                                self.log(f"[AUTO] NON-BIO detected but {non_cell} not found, falling back to {cell}")
-                        else:
-                            # BIO or unknown -> use original cell
-                            execute_cell = base_cell
-                            if base_cell in self.sequences:
-                                self.log(f"[AUTO] BIO detected -> using {execute_cell} sequence")
-                            else:
-                                self.log(f"[AUTO] {base_cell} not found, falling back to {cell}")
+                if class_name == 'non-biodegradable':
+                    # Use NON variant
+                    non_cell = f"{base_cell}_NON"
+                    if non_cell in self.sequences:
+                        execute_cell = non_cell
+                        self.log(f"[AUTO] NON-BIO locked -> using {execute_cell} sequence")
                     else:
-                        self.log("[AUTO] Could not grab frame for classification")
+                        self.log(f"[AUTO] NON-BIO locked but {non_cell} not found, falling back to {base_cell}")
+                        execute_cell = base_cell
                 else:
-                    self.log("[AUTO] Camera not available for classification")
+                    # BIO or unknown -> use original cell
+                    execute_cell = base_cell
+                    self.log(f"[AUTO] BIO locked -> using {execute_cell} sequence")
             else:
-                self.log("[AUTO] No detected object info for classification")
+                self.log("[AUTO] No confirmed classification yet, using original sequence")
 
         if execute_cell not in self.sequences:
             self.log(f"[AUTO] No sequence for {execute_cell}, skipping")
@@ -3338,6 +3584,12 @@ class UnifiedControlSystem:
             self._safe_after(0, lambda c=cell: self.log(f"Pickup for {c} complete! (Total: {total_elapsed:.3f}s)"))
             self._safe_after(0, lambda: self.log("Object picked up successfully!"))
 
+            # Send classification webhook immediately
+            self._safe_after(0, lambda c=cell: self.send_webhook_after_pickup(c))
+
+            # Send bin capacity monitoring after short delay (allow Arduino to update sensors)
+            self._safe_after(2000, lambda c=cell: self.send_bin_capacity_after_drop(c))
+
             # Recapture empty grid after successful pickup
             self._safe_after(1000, self._recapture_empty_grid_after_pickup)
 
@@ -3346,6 +3598,11 @@ class UnifiedControlSystem:
         finally:
             # Clear pickup in progress flag
             self._pickup_in_progress = False
+
+            # UNLOCK classification
+            self._pickup_sequence_started = False
+            self._locked_classification = None
+            self._pickup_pending = False
 
             # Clean up thread reference
             if hasattr(self, '_current_pickup_thread'):
@@ -3370,12 +3627,20 @@ class UnifiedControlSystem:
         """Clear detection state after successful pickup"""
         self.detected_objects = []
         self.current_detection_cell = None
-        
+
         # Reset cell hysteresis
         self.cell_confirmed = None
         self.cell_confirmation_count = 0
         self.last_detected_cell = None
         self.last_detection_time = 0
+
+        # UNLOCK classification - allow new classifications for next object
+        self._pickup_sequence_started = False
+        self._locked_classification = None
+        self._pickup_pending = False
+        self.classification_history = []
+        self.classification_confirmed = None
+        self.log("[AUTO] Classification unlocked - ready for next object")
 
         # Re-enable auto pickup if it was enabled
         if self.auto_pickup_enabled:

@@ -1,0 +1,22 @@
+===========================================================
+BIN CAPACITY MONITORING (uses the deployed website itself):
+Local API URL: http://localhost:8000/api/bin-reading-read
+Production API URL: https://smartrecyclebot-b86k.onrender.com/api/bin-reading-read
+
+Table name: bin_readings
+Table columns: id, bin_id, fill_level (float), created_at (date time), updated_at (date time)
+
+===========================================================
+CLASSIFICATION (uses the Python Backend service):
+DEVICE_API_KEY: 9kX7mP2nQ8vL4sR6wT1yF3hJ5gB0dZ9c
+Local Website URL: https://localhost:8000
+Production Website URL: https://smartrecyclebot-b86k.onrender.com
+Production Backend URL: https://smartrecyclebot-python.onrender.com
+
+Table name: waste_objects
+Table columns: id, bin_id, model_name (nullable string), classification (string), score (float, 4 decimals), created_at (date time), updated_at (date time)
+
+NOTES:
+1. bin_id only has two integers: 1 for biodegradable, 2 for non-biodegradable
+2. model_name can be empty.
+3. Local URLs are added to ensure it works both on the client's local side and production side when it comes to receiving data.
