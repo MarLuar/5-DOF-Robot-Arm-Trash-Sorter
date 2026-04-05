@@ -853,6 +853,19 @@ class UnifiedControlSystem:
         self.convert_status_label = ttk.Label(convert_frame, text="Select a cell to convert", foreground='gray', font=('Helvetica', 7))
         self.convert_status_label.pack(anchor='w', pady=3)
 
+        # Bulk Copy BIO to NON-BIO
+        bulk_copy_frame = ttk.LabelFrame(right_frame, text="Bulk Copy BIO → NON-BIO", padding="8")
+        bulk_copy_frame.pack(fill=tk.X, pady=10)
+
+        ttk.Label(bulk_copy_frame, text="Copy all A1-C4 sequences to NON-BIO:", font=('Helvetica', 8)).pack(anchor='w', pady=(0,5))
+        ttk.Label(bulk_copy_frame, text="Sets Step 7 & 8 base to 0°", font=('Helvetica', 7), foreground='gray').pack(anchor='w')
+
+        ttk.Button(bulk_copy_frame, text="Copy All BIO → NON-BIO", width=22,
+                  command=self.copy_all_bio_to_nonbio).pack(pady=8)
+
+        self.bulk_copy_status_label = ttk.Label(bulk_copy_frame, text="Ready to copy", foreground='gray', font=('Helvetica', 7))
+        self.bulk_copy_status_label.pack(anchor='w', pady=3)
+
         # Global Base Adjustment
         base_adj_frame = ttk.LabelFrame(right_frame, text="Global Base Adjustment", padding="8")
         base_adj_frame.pack(fill=tk.X, pady=10)
@@ -1832,6 +1845,84 @@ class UnifiedControlSystem:
         except Exception as e:
             self.log(f"Conversion error: {e}")
             messagebox.showerror("Error", f"Failed to convert sequence: {e}")
+
+    def copy_all_bio_to_nonbio(self):
+        """Copy all BIO sequences (A1-C4) to NON-BIO counterparts with Step 7-8 base = 0°"""
+        # Confirm with user
+        confirm = messagebox.askyesno(
+            "Confirm Bulk Copy",
+            "Copy all BIO sequences (A1-C4) to NON-BIO?\n\n"
+            "This will:\n"
+            "• Copy 12 sequences (A1, A2, A3, A4, B1-B4, C1-C4)\n"
+            "• Create NON-BIO variants (A1_NON, A2_NON, etc.)\n"
+            "• Set Step 7 & 8 base angle to 0°\n\n"
+            "Existing NON-BIO sequences will be overwritten!"
+        )
+
+        if not confirm:
+            return
+
+        try:
+            import copy
+
+            # Cell names A1-C4 (rows A, B, C; columns 1-4)
+            CELL_NAMES = [f"{row}{col}" for row in ['A', 'B', 'C'] for col in range(1, 5)]
+
+            copied_count = 0
+            modified_count = 0
+            skipped = []
+
+            for cell in CELL_NAMES:
+                non_cell = f"{cell}_NON"
+
+                if cell not in self.sequences:
+                    skipped.append(cell)
+                    continue
+
+                # Deep copy the BIO sequence
+                bio_sequence = copy.deepcopy(self.sequences[cell])
+
+                # Check if sequence has at least 8 steps
+                if len(bio_sequence) < 8:
+                    skipped.append(cell)
+                    continue
+
+                # Modify steps 7 and 8 (indices 6 and 7) - set base to 0°
+                for step_idx in [6, 7]:
+                    if 'angles' in bio_sequence[step_idx]:
+                        bio_sequence[step_idx]['angles'][0] = 0  # Set to 0° for NON-BIO
+                        modified_count += 1
+
+                # Save to NON-BIO cell
+                self.sequences[non_cell] = bio_sequence
+                copied_count += 1
+                self.log(f"  {cell} → {non_cell} (Steps 7-8 base = 0°)")
+
+            # Save sequences
+            with open(SEQUENCES_FILE, 'w') as f:
+                json.dump(self.sequences, f, indent=2)
+
+            # Update UI
+            status_msg = f"✓ Copied {copied_count} sequences"
+            self.bulk_copy_status_label.config(text=status_msg, foreground='green')
+            self.log(f"✓ Bulk copy complete: {copied_count} sequences, {modified_count} steps modified")
+
+            if skipped:
+                self.log(f"⚠ Skipped (no sequence or <8 steps): {', '.join(skipped)}")
+
+            # Reload cell list to show updated sequences
+            self.refresh_seq_list()
+
+            messagebox.showinfo(
+                "Bulk Copy Complete",
+                f"Successfully copied {copied_count} BIO sequences to NON-BIO\n\n"
+                f"Modified {modified_count} steps (Steps 7 & 8 base = 0°)\n"
+                f"{'Skipped: ' + ', '.join(skipped) if skipped else ''}"
+            )
+
+        except Exception as e:
+            self.log(f"Bulk copy error: {e}")
+            messagebox.showerror("Error", f"Failed to copy sequences: {e}")
 
     # Auto-Offset Ratio Methods (for grid alignment)
     def adjust_offset_ratio(self, amount):
