@@ -12,12 +12,18 @@ from PIL import Image, ImageTk
 import json
 import time
 import os
+import sys
+from pathlib import Path
+
+# Add project root to path for config import
+sys.path.insert(0, str(Path(__file__).parent.parent))
+import config
 
 # Grid configuration
 GRID_ROWS = 4
 GRID_COLS = 4
 CELL_SIZE_CM = 5
-CALIBRATION_FILE = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/vision_calibration.json'
+CALIBRATION_FILE = str(config.CALIBRATION_FILE)
 
 CAMERA_SETTINGS = {
     'brightness': -30,
@@ -53,7 +59,7 @@ class SimpleGridCalibrationGUI:
 
         # Background reference
         self.empty_grid = None
-        self.bg_file = '/home/koogs/empty_grid_reference.jpg'
+        self.bg_file = config.BG_FILE_LEGACY
         if os.path.exists(self.bg_file):
             self.empty_grid = cv2.imread(self.bg_file)
             print(f"Loaded existing empty grid reference")
@@ -610,7 +616,7 @@ Tips:
         cv2.putText(debug, "Final", (w-190, h-160),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
 
-        cv2.imwrite('/home/koogs/object_detection_color.jpg', debug)
+        cv2.imwrite(str(config.PROJECT_ROOT / 'object_detection_color.jpg'), debug)
 
         if not candidates:
             messagebox.showinfo("No Object",

@@ -9,7 +9,13 @@ from tensorflow import keras
 from tensorflow.keras import layers
 import numpy as np
 import os
+import sys
+from pathlib import Path
 from datetime import datetime
+
+# Add project root to path for config import
+sys.path.insert(0, str(Path(__file__).parent))
+import config
 
 # Configuration (optimized for CPU/low memory)
 IMG_SIZE = (160, 160)  # Reduced from 224x224 for MobileNetV2
@@ -27,9 +33,9 @@ if gpus:
     except RuntimeError as e:
         print(e)
 
-# Paths
-DATASET_DIR = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/dataset_classification'
-MODEL_DIR = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/models'
+# Paths (using cross-platform config)
+DATASET_DIR = str(config.DATASET_CLASSIFICATION_DIR)
+MODEL_DIR = str(config.MODELS_DIR)
 
 # Create model directory
 os.makedirs(MODEL_DIR, exist_ok=True)

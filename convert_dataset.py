@@ -7,10 +7,15 @@ Reads labels and organizes images into class folders
 import os
 import shutil
 from pathlib import Path
+import sys
 
-# Paths
-YOLO_DATASET = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/dataset'
-CLASS_DATASET = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/dataset_classification'
+# Add project root to path for config import
+sys.path.insert(0, str(Path(__file__).parent))
+import config
+
+# Paths (using cross-platform config)
+YOLO_DATASET = str(config.DATASET_DIR)
+CLASS_DATASET = str(config.DATASET_CLASSIFICATION_DIR)
 
 # Class mapping (from your classes.txt)
 # 0 = biodegradable, 1 = non-biodegradable

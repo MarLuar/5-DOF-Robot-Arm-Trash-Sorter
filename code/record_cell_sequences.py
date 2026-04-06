@@ -7,6 +7,12 @@ import json
 import time
 import serial
 import serial.tools.list_ports
+import sys
+from pathlib import Path
+
+# Add project root to path for config import
+sys.path.insert(0, str(Path(__file__).parent.parent))
+import config
 
 # Grid configuration
 GRID_ROWS = 4
@@ -14,7 +20,7 @@ GRID_COLS = 4
 CELL_NAMES = [f"{chr(ord('A')+row)}{col+1}" for row in range(GRID_ROWS) for col in range(GRID_COLS)]
 
 # Sequence file
-SEQUENCES_FILE = '/home/koogs/cell_sequences.json'
+SEQUENCES_FILE = str(config.SEQUENCES_FILE)
 
 
 def load_sequences():
@@ -213,7 +219,7 @@ def main():
     if recorded >= len(CELL_NAMES):
         print("\n✅ ALL CELLS RECORDED!")
         print("\n🚀 NEXT: Run vision pickup")
-        print("   python3 /home/koogs/vision_pickup_cell_based.py")
+        print(f"   python3 {config.PROJECT_ROOT / 'code' / 'unified_control.py'}")
     else:
         print("\n⚠️  Some cells still need recording")
         print("   Run this script again to complete")

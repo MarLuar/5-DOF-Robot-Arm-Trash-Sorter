@@ -6,8 +6,14 @@ and change Step 7 & 8 base angle to 0°
 
 import json
 import copy
+import sys
+from pathlib import Path
 
-SEQUENCES_FILE = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/sequences/cell_sequences.json'
+# Add project root to path for config import
+sys.path.insert(0, str(Path(__file__).parent))
+import config
+
+SEQUENCES_FILE = str(config.SEQUENCES_FILE)
 
 # Load sequences
 with open(SEQUENCES_FILE, 'r') as f:

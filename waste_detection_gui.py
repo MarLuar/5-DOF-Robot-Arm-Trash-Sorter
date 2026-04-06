@@ -15,16 +15,19 @@ import os
 import serial
 import serial.tools.list_ports
 from datetime import datetime
+from pathlib import Path
+
+# Add project root to path for config import
+sys.path.insert(0, str(Path(__file__).parent))
+import config
 
 # Import waste classifier
-import sys
-sys.path.insert(0, '/home/koogs/Documents/5DOF_Robotic_Arm_Vision')
 from waste_classifier import WasteClassifier
 
 # Configuration
-BG_FILE = '/home/koogs/empty_grid_reference.jpg'
+BG_FILE = config.BG_FILE_LEGACY
 CAMERA_INDEX = 0  # ZStar camera index
-ARDUINO_PORT = '/dev/ttyUSB0'  # Default Arduino serial port
+ARDUINO_PORT = config.get_default_serial_port()  # Auto-detect Arduino port
 BAUD_RATE = 115200
 
 

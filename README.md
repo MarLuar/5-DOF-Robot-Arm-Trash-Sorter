@@ -109,7 +109,7 @@ This system enables a 5-DOF robotic arm to automatically detect, classify, and p
 
 ## Quick Start
 
-### 1. Setup
+### Linux Setup
 
 ```bash
 cd /home/koogs/Documents/5DOF_Robotic_Arm_Vision
@@ -118,11 +118,30 @@ cd /home/koogs/Documents/5DOF_Robotic_Arm_Vision
 pip3 install opencv-python numpy pyserial pillow tensorflow --break-system-packages
 ```
 
-### 2. Run Unified Control System
+### Windows Setup
 
+```cmd
+cd C:\path\to\5DOF_Robotic_Arm_Vision
+
+# Install dependencies
+pip install opencv-python numpy pyserial pillow tensorflow
+```
+
+### Running the Application
+
+**Linux:**
 ```bash
 python3 code/unified_control.py
 ```
+
+**Windows:**
+```cmd
+python code\unified_control.py
+```
+
+**Or use the quick start menu:**
+- **Linux:** `./run.sh`
+- **Windows:** Double-click `run.bat`
 
 ### 3. Workflow
 

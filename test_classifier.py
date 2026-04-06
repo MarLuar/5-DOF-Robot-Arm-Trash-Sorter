@@ -6,6 +6,13 @@ Test waste classifier on validation dataset
 import tensorflow as tf
 import numpy as np
 import os
+import sys
+from pathlib import Path
+
+# Add project root to path for config import
+sys.path.insert(0, str(Path(__file__).parent))
+import config
+
 from waste_classifier import WasteClassifier
 import cv2
 
@@ -13,8 +20,8 @@ import cv2
 print("Loading classifier...")
 classifier = WasteClassifier()
 
-# Test directories
-VAL_DIR = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/dataset_classification/val'
+# Test directories (using cross-platform config)
+VAL_DIR = str(config.DATASET_CLASSIFICATION_DIR / 'val')
 classes = ['biodegradable', 'non-biodegradable']
 
 print("\n" + "=" * 60)

@@ -10,6 +10,12 @@ from tensorflow.keras import layers
 import numpy as np
 import cv2
 import os
+import sys
+from pathlib import Path
+
+# Add project root to path for config import
+sys.path.insert(0, str(Path(__file__).parent))
+import config
 
 class WasteClassifier:
     """Biodegradable vs Non-biodegradable classifier"""
@@ -22,7 +28,7 @@ class WasteClassifier:
         """
         if model_path is None:
             # Auto-find best model (prefer inference model without augmentation)
-            model_dir = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/models'
+            model_dir = str(config.MODELS_DIR)
             inf_path = f"{model_dir}/waste_inference.keras"
             keras_path = f"{model_dir}/waste_classifier_best.keras"
             h5_path = f"{model_dir}/waste_classifier_best.h5"

@@ -7,10 +7,16 @@ from tensorflow.keras import layers
 import numpy as np
 import cv2
 import os
+import sys
+from pathlib import Path
+
+# Add project root to path for config import
+sys.path.insert(0, str(Path(__file__).parent))
+import config
 
 # Load the trained model
 print("Loading trained model...")
-trained_model = tf.keras.models.load_model('/home/koogs/Documents/5DOF_Robotic_Arm_Vision/models/waste_classifier_best.keras')
+trained_model = tf.keras.models.load_model(str(config.MODELS_DIR / 'waste_classifier_best.keras'))
 
 # Get MobileNetV2 base model (layer 2)
 base_model = trained_model.layers[2]
@@ -42,11 +48,11 @@ for i, layer in enumerate(inference_model.layers[1].layers):
         pass
 
 # Save inference model
-inference_model.save('/home/koogs/Documents/5DOF_Robotic_Arm_Vision/models/waste_inference.keras')
+inference_model.save(str(config.MODELS_DIR / 'waste_inference.keras'))
 print("Inference model saved!")
 
 # Test
-val_dir = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/dataset_classification/val'
+val_dir = str(config.DATASET_CLASSIFICATION_DIR / 'val')
 print("\nTesting inference model:")
 for cls in ['biodegradable', 'non-biodegradable']:
     imgs = os.listdir(os.path.join(val_dir, cls))[:5]

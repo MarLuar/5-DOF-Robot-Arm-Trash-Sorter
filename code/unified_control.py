@@ -20,7 +20,13 @@ import threading
 import json
 import time
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
+
+# Add project root to path for config import
+sys.path.insert(0, str(Path(__file__).parent.parent))
+import config
 
 # Configuration
 BAUD_RATE = 9600
@@ -85,11 +91,11 @@ DEFAULT_PICKUP = [80, 100, 20, 0, 0]
 JOINT_NAMES = ["Base", "Shoulder", "Elbow", "Wrist", "Gripper"]
 CELL_NAMES = [f"{chr(ord('A')+row)}{col+1}" for row in range(4) for col in range(4)]  # 4x4 = 16 cells
 
-# File paths
-CALIBRATION_FILE = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/vision_calibration.json'
-SEQUENCES_FILE = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/sequences/cell_sequences.json'
-PRESETS_FILE = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/servo_presets.json'
-BG_FILE = '/home/koogs/empty_grid_reference.jpg'
+# File paths (using cross-platform config)
+CALIBRATION_FILE = str(config.CALIBRATION_FILE)
+SEQUENCES_FILE = str(config.SEQUENCES_FILE)
+PRESETS_FILE = str(config.PRESETS_FILE)
+BG_FILE = config.BG_FILE_LEGACY  # Use legacy path for backwards compatibility
 
 
 class UnifiedControlSystem:
@@ -1132,9 +1138,12 @@ class UnifiedControlSystem:
         available_cameras = []
         camera_details = []
 
-        for i in range(8):
+        # Use platform-specific camera enumeration
+        devices = config.enumerate_camera_devices()
+
+        for idx, device_path in devices:
             try:
-                cap = cv2.VideoCapture(i)
+                cap = cv2.VideoCapture(idx)
                 if cap.isOpened():
                     ret, frame = cap.read()
                     if ret:
@@ -1142,14 +1151,14 @@ class UnifiedControlSystem:
                         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                         fps = cap.get(cv2.CAP_PROP_FPS)
                         fps_str = f"{fps:.1f}fps" if fps > 0 else "unknown fps"
-                        available_cameras.append(i)
-                        camera_details.append(f"• /dev/video{i}: {width}x{height} @ {fps_str}")
-                        self.log(f"Camera found: /dev/video{i} - {width}x{height} @ {fps_str}")
+                        available_cameras.append(idx)
+                        camera_details.append(f"• {device_path}: {width}x{height} @ {fps_str}")
+                        self.log(f"Camera found: {device_path} - {width}x{height} @ {fps_str}")
                     cap.release()
                 else:
                     cap.release()
             except Exception as e:
-                self.log(f"Error checking /dev/video{i}: {e}")
+                self.log(f"Error checking {device_path}: {e}")
 
         if available_cameras:
             self.camera_status_label.config(
@@ -1157,10 +1166,10 @@ class UnifiedControlSystem:
                 foreground='green'
             )
 
-            # Auto-select Z-Star (usually video3 or video4)
+            # Auto-select Z-Star (usually index 3 or 4 on Linux, varies on Windows)
             zstar_found = False
             for i in available_cameras:
-                if i in [3, 4]:
+                if i in [3, 4] or (not config.IS_LINUX and i == 0):
                     self.camera_combo.set(str(i))
                     self.log(f"ZStar camera detected at index {i}")
                     zstar_found = True
@@ -1172,12 +1181,14 @@ class UnifiedControlSystem:
 
             # Show popup with camera list
             camera_list = "\n".join(camera_details)
+            selected_device = config.get_camera_device_path(int(self.camera_combo.get()))
+            tip_text = "ZStar camera is usually index 3 or 4 on Linux" if config.IS_LINUX else "Try different camera indices if the image is black"
             messagebox.showinfo(
                 "Cameras Found",
                 f"Found {len(available_cameras)} camera(s):\n\n"
                 f"{camera_list}\n\n"
-                f"Selected: /dev/video{self.camera_combo.get()}\n\n"
-                f"Tip: ZStar camera is usually /dev/video3 or /dev/video4"
+                f"Selected: {selected_device}\n\n"
+                f"Tip: {tip_text}"
             )
         else:
             self.camera_status_label.config(
@@ -1204,13 +1215,14 @@ class UnifiedControlSystem:
             cap = cv2.VideoCapture(index)
 
             if not cap.isOpened():
+                device = config.get_camera_device_path(index)
                 self.camera_status_label.config(
-                    text=f"Failed to open /dev/video{index}",
+                    text=f"Failed to open {device}",
                     foreground='red'
                 )
                 messagebox.showerror(
                     "Camera Test Failed",
-                    f"Could not open camera at /dev/video{index}\n\n"
+                    f"Could not open camera at {device}\n\n"
                     "Please try a different index or check camera connection."
                 )
                 cap.release()
@@ -1236,6 +1248,7 @@ class UnifiedControlSystem:
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS)
+            device = config.get_camera_device_path(index)
 
             cap.release()
 
@@ -1244,11 +1257,11 @@ class UnifiedControlSystem:
                 foreground='green'
             )
 
-            self.log(f"Camera test successful: /dev/video{index} - {width}x{height} @ {fps:.1f}fps")
+            self.log(f"Camera test successful: {device} - {width}x{height} @ {fps:.1f}fps")
 
             messagebox.showinfo(
                 "Camera Test Successful",
-                f"Camera at /dev/video{index} is working!\n\n"
+                f"Camera at {device} is working!\n\n"
                 f"Resolution: {width}x{height}\n"
                 f"FPS: {fps:.1f}\n\n"
                 f"Click 'Save Camera Setting' to use this camera."
@@ -1268,24 +1281,25 @@ class UnifiedControlSystem:
         """Save camera index to configuration file"""
         try:
             index = self.camera_index_var.get()
-            config = {
+            cfg = {
                 'camera_index': int(index),
                 'timestamp': datetime.now().isoformat()
             }
 
-            config_file = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/camera_config.json'
+            config_file = str(config.CAMERA_CONFIG_FILE)
             with open(config_file, 'w') as f:
-                json.dump(config, f, indent=2)
+                json.dump(cfg, f, indent=2)
 
+            device = config.get_camera_device_path(int(index))
             self.camera_status_label.config(
-                text=f"Saved: /dev/video{index}",
+                text=f"Saved: {device}",
                 foreground='green'
             )
-            self.log(f"Camera setting saved: /dev/video{index}")
+            self.log(f"Camera setting saved: {device}")
             messagebox.showinfo(
                 "Setting Saved",
                 f"Camera configuration saved!\n\n"
-                f"Device: /dev/video{index}\n"
+                f"Device: {device}\n"
                 f"File: camera_config.json\n\n"
                 f"The camera will use this setting next time."
             )
@@ -1297,7 +1311,7 @@ class UnifiedControlSystem:
     def load_camera_setting(self):
         """Load camera index from configuration file"""
         try:
-            config_file = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/camera_config.json'
+            config_file = str(config.CAMERA_CONFIG_FILE)
 
             if not os.path.exists(config_file):
                 self.camera_status_label.config(
@@ -1331,12 +1345,13 @@ class UnifiedControlSystem:
         """Set the selected camera and restart calibration preview"""
         try:
             index = int(self.camera_index_var.get())
-            self.log(f"Setting camera for calibration: /dev/video{index}")
+            device = config.get_camera_device_path(index)
+            self.log(f"Setting camera for calibration: {device}")
 
             # Confirm with user
             confirm = messagebox.askyesno(
                 "Set Camera",
-                f"Use /dev/video{index} for grid calibration?\n\n"
+                f"Use {device} for grid calibration?\n\n"
                 f"This will restart the camera preview.\n\n"
                 f"Make sure this is the correct camera for your ZStar."
             )
@@ -1345,20 +1360,20 @@ class UnifiedControlSystem:
                 return
 
             # Save the setting
-            config = {
+            cfg = {
                 'camera_index': index,
                 'timestamp': datetime.now().isoformat()
             }
-            config_file = '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/calibration/camera_config.json'
+            config_file = str(config.CAMERA_CONFIG_FILE)
             with open(config_file, 'w') as f:
-                json.dump(config, f, indent=2)
+                json.dump(cfg, f, indent=2)
 
             # Restart calibration preview with new camera
             self.camera_status_label.config(
-                text=f"Using /dev/video{index}",
+                text=f"Using {device}",
                 foreground='green'
             )
-            self.log(f"Restarting calibration preview with /dev/video{index}...")
+            self.log(f"Restarting calibration preview with {device}...")
 
             # Switch to calibration tab and restart preview
             self.notebook.select(1)  # Select calibration tab
@@ -1366,7 +1381,7 @@ class UnifiedControlSystem:
 
             messagebox.showinfo(
                 "Camera Set",
-                f"Camera set to /dev/video{index}\n\n"
+                f"Camera set to {device}\n\n"
                 f"Calibration preview restarted.\n"
                 f"Check the camera preview to verify."
             )
@@ -2705,9 +2720,9 @@ class UnifiedControlSystem:
         else:
             self.log(f"  ✗ Failed to open at index {camera_index}")
 
-        # Method 2: Try direct device path (more reliable after reboot)
-        if not camera_opened:
-            device_path = f"/dev/video{camera_index}"
+        # Method 2: Try direct device path (Linux only, more reliable after reboot)
+        if not camera_opened and config.IS_LINUX:
+            device_path = config.get_camera_device_path(camera_index)
             self.log(f"Method 2: Trying direct path {device_path} with V4L2 backend...")
             self.cap = cv2.VideoCapture(device_path, cv2.CAP_V4L2)
             if self.cap.isOpened():
@@ -2744,21 +2759,22 @@ class UnifiedControlSystem:
                         self.log(f"    ✗ Failed to open")
                     time.sleep(0.3)
 
-        # Method 4: Scan all /dev/video* devices
+        # Method 4: Scan all camera devices (platform-specific)
         if not camera_opened:
-            import glob
-            devices = sorted(glob.glob("/dev/video[0-9]"))
-            self.log(f"Method 4: Scanning {len(devices)} devices: {devices}")
-            for dev in devices:
-                self.log(f"  Scanning {dev}...")
-                self.cap = cv2.VideoCapture(dev, cv2.CAP_V4L2)
+            devices = config.enumerate_camera_devices()
+            self.log(f"Method 4: Scanning {len(devices)} devices...")
+            for dev_idx, dev_path in devices:
+                self.log(f"  Scanning {dev_path}...")
+                if config.IS_LINUX:
+                    self.cap = cv2.VideoCapture(dev_path, cv2.CAP_V4L2)
+                else:
+                    self.cap = cv2.VideoCapture(dev_idx)
                 if self.cap.isOpened():
                     ret, test_frame = self.cap.read()
                     if ret and test_frame is not None:
                         camera_opened = True
-                        dev_idx = dev.replace("/dev/video", "")
-                        self.log(f"  ✓ Camera found at {dev}: {test_frame.shape}")
-                        self.camera_index_var.set(dev_idx)
+                        self.log(f"  ✓ Camera found at {dev_path}: {test_frame.shape}")
+                        self.camera_index_var.set(str(dev_idx))
                         break
                     else:
                         self.log(f"    ✗ Opened but no frames")
@@ -2807,8 +2823,9 @@ class UnifiedControlSystem:
                 self.log("✗ WARNING: Could not read final verification frame!")
 
             self.log(f"=== Camera Initialization Complete ===")
+            device = config.get_camera_device_path(int(self.camera_index_var.get()))
             self.camera_status_label.config(
-                text=f"Camera: /dev/video{self.camera_index_var.get()}",
+                text=f"Camera: {device}",
                 foreground='green'
             )
 
@@ -2819,15 +2836,15 @@ class UnifiedControlSystem:
         else:
             self.log(f"✗✗✗ CAMERA INITIALIZATION FAILED ✗✗✗")
             self.log(f"Requested index: {camera_index}")
-            import glob
-            devices = sorted(glob.glob("/dev/video[0-9]"))
-            self.log(f"Available devices: {devices}")
+            devices = config.enumerate_camera_devices()
+            device_list = [str(d[1]) for d in devices]
+            self.log(f"Available devices: {device_list}")
             self.log(f"=== Camera Initialization Complete (FAILED) ===")
             messagebox.showerror(
                 "Camera Error",
                 f"Could not open camera!\n\n"
-                f"Tried: index {camera_index}, /dev/video{camera_index}, adjacent indices, all /dev/video* devices\n\n"
-                f"Available devices: {devices}\n\n"
+                f"Tried: index {camera_index}, {device}, adjacent indices, all available devices\n\n"
+                f"Available devices: {device_list}\n\n"
                 f"Make sure:\n"
                 f"1. Camera is plugged in\n"
                 f"2. Try a different USB port\n"
@@ -3458,38 +3475,40 @@ class UnifiedControlSystem:
     def init_camera_settings(self):
         """Initialize camera settings on startup"""
         try:
-            # Read current values from camera
-            import subprocess
-            result = subprocess.run(
-                ['v4l2-ctl', '--device=/dev/video0', '--list-ctrls'],
-                capture_output=True, text=True, timeout=2
-            )
-            if result.returncode == 0:
-                for line in result.stdout.split('\n'):
-                    if 'exposure_time_absolute' in line and 'value=' in line:
-                        try:
-                            val = int(line.split('value=')[1].split()[0])
-                            self.exposure_var.set(val)
-                            self.exposure_value_label.config(text=f"Value: {val} (Auto)")
-                        except: pass
-                    if 'gamma' in line and 'value=' in line:
-                        try:
-                            val = int(line.split('value=')[1].split()[0])
-                            self.gamma_var.set(val)
-                            self.gamma_value_label.config(text=f"Value: {val}")
-                        except: pass
-                    if 'saturation' in line and 'value=' in line:
-                        try:
-                            val = int(line.split('value=')[1].split()[0])
-                            self.saturation_var.set(val)
-                            self.saturation_value_label.config(text=f"Value: {val}")
-                        except: pass
-                    if 'sharpness' in line and 'value=' in line:
-                        try:
-                            val = int(line.split('value=')[1].split()[0])
-                            self.sharpness_var.set(val)
-                            self.sharpness_value_label.config(text=f"Value: {val}")
-                        except: pass
+            # Read current values from camera (Linux only - v4l2-ctl is Linux-specific)
+            if config.IS_LINUX:
+                import subprocess
+                device_path = f"/dev/video{self.camera_index_var.get()}"
+                result = subprocess.run(
+                    ['v4l2-ctl', f'--device={device_path}', '--list-ctrls'],
+                    capture_output=True, text=True, timeout=2
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'exposure_time_absolute' in line and 'value=' in line:
+                            try:
+                                val = int(line.split('value=')[1].split()[0])
+                                self.exposure_var.set(val)
+                                self.exposure_value_label.config(text=f"Value: {val} (Auto)")
+                            except: pass
+                        if 'gamma' in line and 'value=' in line:
+                            try:
+                                val = int(line.split('value=')[1].split()[0])
+                                self.gamma_var.set(val)
+                                self.gamma_value_label.config(text=f"Value: {val}")
+                            except: pass
+                        if 'saturation' in line and 'value=' in line:
+                            try:
+                                val = int(line.split('value=')[1].split()[0])
+                                self.saturation_var.set(val)
+                                self.saturation_value_label.config(text=f"Value: {val}")
+                            except: pass
+                        if 'sharpness' in line and 'value=' in line:
+                            try:
+                                val = int(line.split('value=')[1].split()[0])
+                                self.sharpness_var.set(val)
+                                self.sharpness_value_label.config(text=f"Value: {val}")
+                            except: pass
         except Exception as e:
             pass  # Silently ignore if v4l2-ctl fails
 
@@ -3515,48 +3534,54 @@ class UnifiedControlSystem:
             else:
                 self.exposure_scale.config(state='normal')
 
-            # Get current camera device path
-            try:
-                cam_idx = int(self.camera_index_var.get())
-                device_path = f"/dev/video{cam_idx}"
-            except:
-                device_path = "/dev/video0"
-
-            # Apply settings via v4l2-ctl
-            import subprocess
-
-            # Set exposure mode: 3=Auto, 1=Manual
-            if mode == "auto":
-                result = subprocess.run(
-                    ['v4l2-ctl', f'--device={device_path}',
-                     '-c', 'auto_exposure=3'],
-                    capture_output=True, timeout=2
-                )
-                if result.returncode == 0:
-                    self.log(f"Camera exposure set to AUTO ({device_path})")
-                else:
-                    self.log(f"Warning: v4l2-ctl failed for auto exposure: {result.stderr.decode()}")
+            # Get current camera device path (Linux only)
+            if config.IS_LINUX:
+                try:
+                    cam_idx = int(self.camera_index_var.get())
+                    device_path = f"/dev/video{cam_idx}"
+                except:
+                    device_path = "/dev/video0"
             else:
-                # First set to manual mode, then set exposure value
+                device_path = None
+
+            # Apply settings via v4l2-ctl (Linux only)
+            if device_path:
+                import subprocess
+
+                # Set exposure mode: 3=Auto, 1=Manual
+                if mode == "auto":
+                    result = subprocess.run(
+                        ['v4l2-ctl', f'--device={device_path}',
+                         '-c', 'auto_exposure=3'],
+                        capture_output=True, timeout=2
+                    )
+                    if result.returncode == 0:
+                        self.log(f"Camera exposure set to AUTO ({device_path})")
+                    else:
+                        self.log(f"Warning: v4l2-ctl failed for auto exposure: {result.stderr.decode()}")
+                else:
+                    # First set to manual mode, then set exposure value
+                    result = subprocess.run(
+                        ['v4l2-ctl', f'--device={device_path}',
+                         '-c', 'auto_exposure=1',
+                         '-c', f'exposure_time_absolute={exposure}'],
+                        capture_output=True, timeout=2
+                    )
+                    if result.returncode == 0:
+                        self.log(f"Camera exposure set to MANUAL: {exposure} ({device_path})")
+                    else:
+                        self.log(f"Warning: v4l2-ctl failed for manual exposure: {result.stderr.decode()}")
+
+                # Set gamma, saturation, sharpness (always applied)
                 result = subprocess.run(
                     ['v4l2-ctl', f'--device={device_path}',
-                     '-c', 'auto_exposure=1',
-                     '-c', f'exposure_time_absolute={exposure}'],
+                     '-c', f'gamma={gamma}',
+                     '-c', f'saturation={saturation}',
+                     '-c', f'sharpness={sharpness}'],
                     capture_output=True, timeout=2
                 )
-                if result.returncode == 0:
-                    self.log(f"Camera exposure set to MANUAL: {exposure} ({device_path})")
-                else:
-                    self.log(f"Warning: v4l2-ctl failed for manual exposure: {result.stderr.decode()}")
-
-            # Set gamma, saturation, sharpness (always applied)
-            result = subprocess.run(
-                ['v4l2-ctl', f'--device={device_path}',
-                 '-c', f'gamma={gamma}',
-                 '-c', f'saturation={saturation}',
-                 '-c', f'sharpness={sharpness}'],
-                capture_output=True, timeout=2
-            )
+            else:
+                self.log("Camera settings via v4l2-ctl not supported on this platform")
 
         except Exception as e:
             self.log(f"Camera setting error: {e}")
