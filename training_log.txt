@@ -1,0 +1,26 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1774888729.890928  289526 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+I0000 00:00:1774888730.021064  289526 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1774888731.467904  289526 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+E0000 00:00:1774888732.176604  289526 cuda_platform.cc:52] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+============================================================
+WASTE CLASSIFIER TRAINING
+============================================================
+
+TensorFlow version: 2.21.0
+GPU Available: []
+
+Loading dataset...
+Traceback (most recent call last):
+  File "/home/koogs/Documents/5DOF_Robotic_Arm_Vision/train_waste_classifier.py", line 37, in <module>
+    train_ds = tf.keras.utils.image_dataset_from_directory(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/koogs/tf_env/lib/python3.12/site-packages/keras/src/utils/image_dataset_utils.py", line 265, in image_dataset_from_directory
+    image_paths, labels, class_names = dataset_utils.index_directory(
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/koogs/tf_env/lib/python3.12/site-packages/keras/src/utils/dataset_utils.py", line 743, in index_directory
+    for subdir in sorted(os_module.listdir(directory)):
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/home/koogs/Documents/5DOF_Robotic_Arm_Vision/dataset_classification/images/train'

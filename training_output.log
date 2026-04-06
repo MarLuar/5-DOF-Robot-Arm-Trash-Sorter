@@ -1,0 +1,65 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1774896451.861258  343856 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+I0000 00:00:1774896452.210609  343856 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1774896453.852139  343856 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+E0000 00:00:1774896454.644135  343856 cuda_platform.cc:52] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+============================================================
+WASTE CLASSIFIER TRAINING
+============================================================
+
+TensorFlow version: 2.21.0
+GPU Available: []
+
+Loading dataset...
+Found 5565 files belonging to 2 classes.
+Found 1189 files belonging to 2 classes.
+Classes: ['biodegradable', 'non-biodegradable']
+Training images: 5568
+Validation images: 1216
+
+Creating MobileNetV2 model...
+
+Model Summary:
+Model: "functional_1"
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Layer (type)                    ┃ Output Shape           ┃       Param # ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ input_layer_1 (InputLayer)      │ (None, 224, 224, 3)    │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ data_augmentation (Sequential)  │ (None, 224, 224, 3)    │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ true_divide (TrueDivide)        │ (None, 224, 224, 3)    │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ subtract (Subtract)             │ (None, 224, 224, 3)    │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ mobilenetv2_1.00_224            │ (None, 1280)           │     2,257,984 │
+│ (Functional)                    │                        │               │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dropout (Dropout)               │ (None, 1280)           │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dense (Dense)                   │ (None, 128)            │       163,968 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dropout_1 (Dropout)             │ (None, 128)            │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dense_1 (Dense)                 │ (None, 1)              │           129 │
+└─────────────────────────────────┴────────────────────────┴───────────────┘
+ Total params: 2,422,081 (9.24 MB)
+ Trainable params: 164,097 (641.00 KB)
+ Non-trainable params: 2,257,984 (8.61 MB)
+
+============================================================
+STARTING TRAINING
+============================================================
+Epoch 1/15
+W0000 00:00:1774896458.386344  343976 cpu_allocator_impl.cc:82] Allocation of 146758314 exceeds 10% of free system memory.
+W0000 00:00:1774896458.645099  343979 cpu_allocator_impl.cc:82] Allocation of 41990400 exceeds 10% of free system memory.
+W0000 00:00:1774896458.969339  343980 png_io.cc:96] PNG warning: iCCP: known incorrect sRGB profile
+W0000 00:00:1774896459.008418  343982 png_io.cc:96] PNG warning: iCCP: known incorrect sRGB profile
+W0000 00:00:1774896459.008505  343982 png_io.cc:96] PNG warning: iCCP: cHRM chunk does not match sRGB
+W0000 00:00:1774896459.020845  343983 cpu_allocator_impl.cc:82] Allocation of 59885568 exceeds 10% of free system memory.
+W0000 00:00:1774896459.520800  343980 png_io.cc:96] PNG warning: iCCP: known incorrect sRGB profile
+W0000 00:00:1774896459.608083  343978 png_io.cc:96] PNG warning: iCCP: known incorrect sRGB profile
+W0000 00:00:1774896459.758042  343985 cpu_allocator_impl.cc:82] Allocation of 79135488 exceeds 10% of free system memory.
+W0000 00:00:1774896461.262714  343977 cpu_allocator_impl.cc:82] Allocation of 41370624 exceeds 10% of free system memory.

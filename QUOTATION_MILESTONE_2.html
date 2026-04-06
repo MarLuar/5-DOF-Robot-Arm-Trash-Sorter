@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quotation - Milestone 2</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            line-height: 1.5;
+            color: #000;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #fff;
+        }
+        .header {
+            text-align: center;
+            border-bottom: 2px solid #000;
+            padding-bottom: 15px;
+            margin-bottom: 25px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 22px;
+            text-transform: uppercase;
+        }
+        .header h2 {
+            margin: 8px 0;
+            font-size: 16px;
+            font-weight: normal;
+        }
+        .header h3 {
+            margin: 5px 0;
+            font-size: 14px;
+            font-weight: normal;
+            font-style: italic;
+        }
+        .info-box {
+            border: 1px solid #000;
+            padding: 12px;
+            margin: 20px 0;
+            background: #fff;
+        }
+        .info-box p {
+            margin: 4px 0;
+        }
+        .section-title {
+            font-size: 16px;
+            font-weight: bold;
+            text-transform: uppercase;
+            border-bottom: 2px solid #000;
+            padding-bottom: 5px;
+            margin-top: 25px;
+            margin-bottom: 12px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            font-size: 12px;
+        }
+        th, td {
+            border: 1px solid #000;
+            padding: 8px;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            background: #eee;
+            font-weight: bold;
+        }
+        .amount-col {
+            width: 18%;
+            text-align: right;
+        }
+        .item-col {
+            width: 32%;
+        }
+        .desc-col {
+            width: 50%;
+        }
+        .total-row {
+            background: #eee;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .deliverables ul {
+            list-style: none;
+            padding-left: 0;
+            margin: 10px 0;
+        }
+        .deliverables li:before {
+            content: "[X] ";
+        }
+        .deliverables li {
+            padding: 3px 0;
+            font-size: 12px;
+        }
+        .deliverables h4 {
+            margin: 12px 0 6px 0;
+            font-size: 13px;
+            font-weight: bold;
+        }
+        .comparison-table {
+            font-size: 11px;
+        }
+        .comparison-table th {
+            background: #ddd;
+        }
+        .signature-section {
+            margin-top: 40px;
+        }
+        .signature-row {
+            display: table;
+            width: 100%;
+            margin-bottom: 25px;
+        }
+        .signature-box {
+            display: table-cell;
+            width: 50%;
+            padding: 10px;
+            vertical-align: top;
+        }
+        .signature-line {
+            border-top: 1px solid #000;
+            margin-top: 40px;
+            padding-top: 5px;
+        }
+        .notes {
+            border: 1px solid #000;
+            padding: 10px;
+            margin: 15px 0;
+            background: #fff;
+        }
+        .notes p {
+            margin: 4px 0;
+            font-size: 12px;
+        }
+        .price-highlight {
+            text-align: center;
+            border: 2px solid #000;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .price-highlight .amount {
+            font-size: 28px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .page-break {
+            page-break-before: always;
+        }
+        .no-break {
+            page-break-inside: avoid;
+        }
+        .clients-info {
+            margin: 15px 0;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>QUOTATION</h1>
+        <h2>5-DOF Robotic Arm Control System - Milestone 2</h2>
+        <h3>Complete Vision-Based Auto-Sorting System</h3>
+    </div>
+
+    <div class="info-box">
+        <p><strong>Quotation No:</strong> QT-2026-002</p>
+        <p><strong>Date:</strong> April 1, 2026</p>
+        <p><strong>Previous Milestone:</strong> QT-2026-001 (P3,000 - PAID)</p>
+    </div>
+
+    <div class="clients-info">
+        <p><strong>CLIENTS:</strong> Garnet Garganza, Gene Adrian Capote, John Angelo Ayson, Jomari Tero, Vince Años</p>
+        <p><strong>DEVELOPER:</strong> Mar Luar Igot</p>
+    </div>
+
+    <div class="section-title">PRICE BREAKDOWN</div>
+
+    <table class="no-break">
+        <thead>
+            <tr>
+                <th class="item-col">Item</th>
+                <th class="desc-col">Description</th>
+                <th class="amount-col">Amount (PHP)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Computer Vision System</td>
+                <td>OpenCV-based object detection with real-time grid tracking, color thresholding, contour analysis, and solidity filtering</td>
+                <td style="text-align: right;">1,400</td>
+            </tr>
+            <tr>
+                <td>Auto-Offset Calibration</td>
+                <td>Automatic base angle compensation with adjustable ratio control, 10-sample averaging, and +/-20 deg correction range</td>
+                <td style="text-align: right;">1,000</td>
+            </tr>
+            <tr>
+                <td>Auto-Pickup Automation</td>
+                <td>Fully automated pickup system with 4-second confirmation delay, live offset display, and background thread execution</td>
+                <td style="text-align: right;">800</td>
+            </tr>
+            <tr>
+                <td>Camera Integration</td>
+                <td>ZStar camera configuration UI, device detection, exposure controls (gamma, saturation, sharpness), persistent settings</td>
+                <td style="text-align: right;">400</td>
+            </tr>
+            <tr>
+                <td>Detection Stability System</td>
+                <td>Cell hysteresis (3-confirmations), 8-second detection persistence, camera-thread rendering, max-area filtering</td>
+                <td style="text-align: right;">500</td>
+            </tr>
+            <tr>
+                <td>Real-Time Monitoring</td>
+                <td>Step 3 and 4 base value display showing angles being sent to Arduino with offset breakdown</td>
+                <td style="text-align: right;">200</td>
+            </tr>
+            <tr>
+                <td>Sequence Management</td>
+                <td>Copy/paste functionality, step clipboard, insert dialog, context menus, _NON variant support</td>
+                <td style="text-align: right;">300</td>
+            </tr>
+            <tr>
+                <td>Performance Optimization</td>
+                <td>Thread cleanup, callback cancellation, serial buffer management, Arduino communication fixes</td>
+                <td style="text-align: right;">300</td>
+            </tr>
+            <tr>
+                <td>UI/UX Redesign</td>
+                <td>Control panel with compact layout, camera preview expansion, detection status display</td>
+                <td style="text-align: right;">200</td>
+            </tr>
+            <tr>
+                <td>Structural Reinforcement</td>
+                <td>Camera brace/bracket installation to prevent vibration during robot movement</td>
+                <td style="text-align: right;">100</td>
+            </tr>
+            <tr>
+                <td>Manual Sequence Programming</td>
+                <td>Custom sequence creation with precise angle plotting for each movement step</td>
+                <td style="text-align: right;">1,300</td>
+            </tr>
+            <tr>
+                <td>Extensive Testing</td>
+                <td>Multiple test runs for sequence polishing, detection tuning, and system stability verification</td>
+                <td style="text-align: right;">1,000</td>
+            </tr>
+            <tr>
+                <td>Debug Logging System</td>
+                <td>Comprehensive logging with timing analysis, thread tracking, and event categorization</td>
+                <td style="text-align: right;">200</td>
+            </tr>
+            <tr>
+                <td>Documentation</td>
+                <td>Complete changes summary, README updates, and user guide</td>
+                <td style="text-align: right;">300</td>
+            </tr>
+            <tr class="total-row">
+                <td colspan="2" style="text-align: right; padding-right: 15px;">GRAND TOTAL</td>
+                <td style="text-align: right; padding-right: 15px;">P8,000</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="price-highlight">
+        <div style="font-size: 16px; font-weight: bold;">GRAND TOTAL</div>
+        <div class="amount">P8,000</div>
+    </div>
+
+    <div class="section-title">DELIVERABLES</div>
+
+    <div class="deliverables no-break">
+        <h4>Software Features</h4>
+        <ul>
+            <li>Vision-based object detection with live camera preview</li>
+            <li>Automatic grid calibration with 4-corner click system</li>
+            <li>Real-time object tracking with cell identification (A1-D4)</li>
+            <li>Auto-offset system with ratio control (compensates for grid misalignment)</li>
+            <li>Auto-pickup mode (fully automated, no manual confirmation needed)</li>
+            <li>Camera exposure controls (exposure, gamma, saturation, sharpness)</li>
+            <li>Step 3 and 4 base value display (shows angles sent to Arduino)</li>
+            <li>Copy/paste functionality for sequences and servo angles</li>
+            <li>Detection stability (no flickering, 8-second persistence)</li>
+            <li>Compact control panel with accessible layout</li>
+            <li>Comprehensive debug logging system</li>
+        </ul>
+
+        <h4>Hardware Improvements</h4>
+        <ul>
+            <li>Camera brace/bracket installation (prevents vibration during operation)</li>
+            <li>Stable camera mounting for accurate vision detection</li>
+        </ul>
+
+        <h4>Testing and Quality</h4>
+        <ul>
+            <li>Manual sequence programming with precise angle plotting</li>
+            <li>Multiple test runs for sequence polishing</li>
+            <li>Detection threshold tuning</li>
+            <li>System stability verification</li>
+            <li>Thread safety and performance optimization</li>
+        </ul>
+
+        <h4>Documentation</h4>
+        <ul>
+            <li>Complete changes summary (36 commits, approximately 2,000 lines of code)</li>
+            <li>System architecture documentation</li>
+            <li>User guide for all features</li>
+        </ul>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div class="section-title">COMPARISON: MILESTONE 1 vs MILESTONE 2</div>
+
+    <table class="comparison-table no-break">
+        <thead>
+            <tr>
+                <th style="width: 30%;">Feature</th>
+                <th style="width: 35%;">Milestone 1</th>
+                <th style="width: 35%;">Milestone 2</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Control Method</td>
+                <td>Manual button clicks</td>
+                <td>Fully automated vision-based</td>
+            </tr>
+            <tr>
+                <td>Object Detection</td>
+                <td>None</td>
+                <td>Real-time with OpenCV</td>
+            </tr>
+            <tr>
+                <td>Pickup Process</td>
+                <td>Manual confirmation required</td>
+                <td>Automatic after 4s detection</td>
+            </tr>
+            <tr>
+                <td>Calibration</td>
+                <td>Manual base offset</td>
+                <td>Auto-offset with ratio control</td>
+            </tr>
+            <tr>
+                <td>Camera System</td>
+                <td>None</td>
+                <td>Full integration with controls</td>
+            </tr>
+            <tr>
+                <td>Detection Stability</td>
+                <td>N/A</td>
+                <td>Hysteresis + persistence</td>
+            </tr>
+            <tr>
+                <td>Sequence Creation</td>
+                <td>Basic builder</td>
+                <td>Copy/paste + variants</td>
+            </tr>
+            <tr>
+                <td>Monitoring</td>
+                <td>Basic logs</td>
+                <td>Real-time angle display</td>
+            </tr>
+            <tr>
+                <td>Performance</td>
+                <td>Some lag issues</td>
+                <td>Fully optimized</td>
+            </tr>
+            <tr>
+                <td>Code Complexity</td>
+                <td>Approx. 500 lines</td>
+                <td>Approx. 2,500 lines (+2,000)</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="section-title">NOTES</div>
+
+    <div class="notes no-break">
+        <p>- Milestone 1 (P3,000) has been paid in full</p>
+        <p>- This quotation covers Milestone 2 only</p>
+        <p>- Robotic arm unit and camera are client-provided</p>
+        <p>- Future milestones (if any) will be quoted separately</p>
+        <p>- 30-day support included for bug fixes</p>
+        <p>- Training session included for system handover</p>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div class="section-title">SIGNATURES</div>
+
+    <div class="signature-section no-break">
+        <div class="signature-row">
+            <div class="signature-box">
+                <div class="signature-line">
+                    <strong>Mar Luar Igot</strong><br>
+                    Developer
+                </div>
+            </div>
+            <div class="signature-box">
+                <div class="signature-line">
+                    <strong>Client Representative</strong>
+                </div>
+            </div>
+        </div>
+
+        <div class="signature-row">
+            <div class="signature-box">
+                <div class="signature-line">
+                    <strong>Client Representative</strong>
+                </div>
+            </div>
+            <div class="signature-box">
+                <div class="signature-line">
+                    <strong>Client Representative</strong>
+                </div>
+            </div>
+        </div>
+
+        <div class="signature-row">
+            <div class="signature-box">
+                <div class="signature-line">
+                    <strong>Client Representative</strong>
+                </div>
+            </div>
+            <div class="signature-box">
+            </div>
+        </div>
+    </div>
+
+    <div style="margin-top: 50px; padding-top: 15px; border-top: 1px solid #000; font-size: 10px;">
+        <p>Quotation No: QT-2026-002 | Date: April 1, 2026 | Page 3 of 3</p>
+    </div>
+
+</body>
+</html>

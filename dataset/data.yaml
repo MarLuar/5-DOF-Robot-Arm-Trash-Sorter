@@ -1,0 +1,7 @@
+names:
+- biodegradable
+- non-biodegradable
+nc: 2
+train: /content/final_dataset/images/train
+val: /content/final_dataset/images/val
+test: /content/final_dataset/images/test
